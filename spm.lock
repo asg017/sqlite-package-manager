@@ -1,0 +1,145 @@
+{
+  "extensions": {
+    "github.com/asg017/sqlite-url": {
+      "version": "v0.1.0-alpha.3",
+      "resolved_url": "https://github.com/asg017/sqlite-url",
+      "resolved_spm_json": "https://github.com/asg017/sqlite-url/releases/download/v0.1.0-alpha.3/spm.json",
+      "integrity": "",
+      "spm_json": {
+        "version": 0,
+        "extensions": {
+          "url0": {
+            "description": "",
+            "platforms": [
+              {
+                "os": "linux",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-url-v0.1.0-alpha.3-linux-x86_64.tar.gz",
+                "asset_sha256": "c32b17df51a98864a398baeebfaf8aa174eb86032d1fcc5997141e652f902c81",
+                "asset_md5": "BiRxzQRjunV96d8CZYkYqA=="
+              },
+              {
+                "os": "darwin",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-url-v0.1.0-alpha.3-darwin-x86_64.tar.gz",
+                "asset_sha256": "ba2f59256bb502bb3147e85815105bce042c8134dcd9b5982571cbbdc6a1f30c",
+                "asset_md5": "pkYFu16hDMGZz9hfQrNDlg=="
+              }
+            ]
+          }
+        }
+      }
+    },
+    "github.com/asg017/sqlite-http": {
+      "version": "v0.1.0-alpha.2",
+      "resolved_url": "https://github.com/asg017/sqlite-http",
+      "resolved_spm_json": "https://github.com/asg017/sqlite-http/releases/download/v0.1.0-alpha.2/spm.json",
+      "integrity": "",
+      "spm_json": {
+        "version": 0,
+        "extensions": {
+          "http0": {
+            "description": "",
+            "platforms": [
+              {
+                "os": "linux",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-http-v0.1.0-alpha.2-linux-x86_64.tar.gz",
+                "asset_sha256": "3bdea62a980fa66d825aac6ca0da7053221774dcf6e16b0904d414f8e3d6d6a8",
+                "asset_md5": "DFxotizU/58Mc1vNbppb+w=="
+              },
+              {
+                "os": "darwin",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-http-v0.1.0-alpha.2-darwin-x86_64.tar.gz",
+                "asset_sha256": "2723f12564deaa400dcb7a2bf5faa4f8284c35ff62b88860bde07032da35a9d6",
+                "asset_md5": "T3aF3ZdIef7lF0XAWPDGsg=="
+              },
+              {
+                "os": "windows",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-http-v0.1.0-alpha.2-windows-x86_64.tar.gz",
+                "asset_sha256": "dd17d0066224f112e4d4b9b68c5db7578caebc77e8fe5338044dba6d30a68406",
+                "asset_md5": "in2IeQdnBJGn9ZH8Qh5yaQ=="
+              }
+            ]
+          }
+        }
+      }
+    },
+    "github.com/asg017/sqlite-path": {
+      "version": "v0.2.0-alpha.1",
+      "resolved_url": "https://github.com/asg017/sqlite-path",
+      "resolved_spm_json": "https://github.com/asg017/sqlite-path/releases/download/v0.2.0-alpha.1/spm.json",
+      "integrity": "",
+      "spm_json": {
+        "version": 0,
+        "extensions": {
+          "path0": {
+            "description": "",
+            "platforms": [
+              {
+                "os": "linux",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-path-v0.2.0-alpha.1-linux-x86_64.tar.gz",
+                "asset_sha256": "040a5b89c2f70c176251414c6c517e0116958e4f810a8b579a86de00c74edbc2",
+                "asset_md5": "/tjynk9EhB/c6ATKjVU0wg=="
+              },
+              {
+                "os": "darwin",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-path-v0.2.0-alpha.1-darwin-x86_64.tar.gz",
+                "asset_sha256": "6257095ac5eead76da801d5832463b2f6352c15bd84f25374b77c951276d2b0d",
+                "asset_md5": "7MPeVuRypdEWJJb2qo2v1Q=="
+              },
+              {
+                "os": "windows",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-path-v0.2.0-alpha.1-windows-x86_64.tar.gz",
+                "asset_sha256": "ddefedeba9291fc62b6818d425d363142d392b0c568cd428f648c4acb87b65a6",
+                "asset_md5": "Tty30X/8OqRW4ElCheRQKg=="
+              }
+            ]
+          }
+        }
+      }
+    },
+    "github.com/asg017/sqlite-html": {
+      "version": "v0.1.2-alpha.4",
+      "resolved_url": "https://github.com/asg017/sqlite-html",
+      "resolved_spm_json": "https://github.com/asg017/sqlite-html/releases/download/v0.1.2-alpha.4/spm.json",
+      "integrity": "",
+      "spm_json": {
+        "version": 0,
+        "extensions": {
+          "html0": {
+            "description": "",
+            "platforms": [
+              {
+                "os": "linux",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-html-v0.1.2-alpha.4-linux-x86_64.tar.gz",
+                "asset_sha256": "b41a28aab3d374a0a29eb9a7e0a03fa86c4650653f3af8b936580503d118af8e",
+                "asset_md5": "2Uzq0vLJeOX1MqmWoxR6wg=="
+              },
+              {
+                "os": "darwin",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-html-v0.1.2-alpha.4-darwin-x86_64.tar.gz",
+                "asset_sha256": "58dd1423ea19c0500a95959a943ae96dee5575e98b0d7ecf4fdcf69862de74e9",
+                "asset_md5": "g7PDUiUT+3g1JMheOhN7ow=="
+              },
+              {
+                "os": "windows",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-html-v0.1.2-alpha.4-windows-x86_64.tar.gz",
+                "asset_sha256": "2b97e6c27ced922a98ea7d31f62b0b7db9e96304430337bf571eac51a33562ea",
+                "asset_md5": "1jj0fBIgxHqdboYieTcP2w=="
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

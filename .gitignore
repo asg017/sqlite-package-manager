@@ -1,0 +1,6 @@
+sqlite_extensions
+/target
+*.dylib
+*.so
+*.dll
+*.db
