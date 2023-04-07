@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use crate::spm::{ProjectDirectory, SpmLock, SpmLockExtension, SpmPackageJson, SpmToml};
+use crate::spm::{
+    ExtensionDefinition, ProjectDirectory, SpmLock, SpmLockExtension, SpmPackageJson, SpmToml,
+};
 
 use clap::ArgMatches;
 
@@ -10,6 +12,13 @@ use std::io::BufReader;
 use tar::Archive;
 
 use toml_edit::{value, Document};
+
+pub trait PackageResolver {
+    fn resolve_spm_json(
+        reference: String,
+        definition: ExtensionDefinition,
+    ) -> Result<SpmPackageJson>;
+}
 
 pub(crate) fn resolve_project_directory(matches: &ArgMatches) -> Result<ProjectDirectory> {
     match matches.get_one::<String>("prefix") {
@@ -107,7 +116,13 @@ pub fn install_command(matches: &ArgMatches) -> Result<()> {
 
 pub fn generate_lockfile(spm_toml: &SpmToml) -> Result<SpmLock> {
     let mut extensions = HashMap::new();
-    for (extension_name, version) in &spm_toml.extensions {
+    for (extension_name, definition) in &spm_toml.extensions {
+        let (version, artifacts) = match definition {
+            ExtensionDefinition::Version(version) => (version.clone(), None),
+            ExtensionDefinition::Definition { version, artifacts } => {
+                (version.clone(), Some(artifacts.clone()))
+            }
+        };
         let resolved_url = format!("https://{extension_name}");
         let resolved_spm_json =
             format!("https://{extension_name}/releases/download/{version}/spm.json");
@@ -124,6 +139,7 @@ pub fn generate_lockfile(spm_toml: &SpmToml) -> Result<SpmLock> {
             extension_name.clone(),
             SpmLockExtension {
                 version: version.clone(),
+                artifacts,
                 resolved_url,
                 resolved_spm_json,
                 integrity,
@@ -131,7 +147,10 @@ pub fn generate_lockfile(spm_toml: &SpmToml) -> Result<SpmLock> {
             },
         );
     }
-    Ok(SpmLock { extensions })
+    Ok(SpmLock {
+        version: 0,
+        extensions,
+    })
 }
 
 pub fn generate_command(matches: &ArgMatches) -> Result<()> {

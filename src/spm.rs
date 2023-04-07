@@ -28,16 +28,26 @@ pub struct SpmPackageJsonPlatform {
     pub asset_md5: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExtensionDefinition {
+    Version(String),
+    Definition {
+        version: String,
+        artifacts: Vec<String>,
+    },
+}
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpmToml {
     pub description: String,
-    pub extensions: HashMap<String, String>,
+    pub extensions: HashMap<String, ExtensionDefinition>,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpmLock {
+    pub version: i32,
     pub extensions: HashMap<String, SpmLockExtension>,
 }
 
@@ -45,6 +55,7 @@ pub struct SpmLock {
 #[serde(rename_all = "camelCase")]
 pub struct SpmLockExtension {
     pub version: String,
+    pub artifacts: Option<Vec<String>>,
     #[serde(rename = "resolved_url")]
     pub resolved_url: String,
     #[serde(rename = "resolved_spm_json")]
@@ -182,6 +193,7 @@ mod tests {
     fn test_spm_lock() {
         let data = r#"
         {
+          "version": 0,
           "extensions": {
             "github.com/asg017/sqlite-path": {
               "version": "vX.X.X",
@@ -237,7 +249,7 @@ mod tests {
         [extensions]
 
         "github.com/asg017/sqlite-path" = "v0.2.0-alpha.1"
-        "github.com/asg017/sqlite-url" =  "v0.1.0-alpha.3"
+        "github.com/asg017/sqlite-url" =  {version = "v0.1.0-alpha.3", artifacts=["url0"]}
         "github.com/asg017/sqlite-html" = "v0.1.2-alpha.4"
         "github.com/asg017/sqlite-http" = "v0.1.0-alpha.2"
         "#;
@@ -245,9 +257,12 @@ mod tests {
         let t: SpmToml = toml::from_str(data).unwrap();
 
         assert_eq!(t.description, "boingo");
-        assert_eq!(
-            t.extensions.get("github.com/asg017/sqlite-path").unwrap(),
-            "v0.2.0-alpha.1"
-        );
+        let x = t.extensions.get("github.com/asg017/sqlite-path").unwrap();
+
+        if let ExtensionDefinition::Version(v) = x {
+            assert_eq!(v, "v0.2.0-alpha.1");
+        } else {
+            panic!();
+        }
     }
 }

@@ -2,6 +2,15 @@
 
 The missing package manager for 3rd party SQLite extensions in the `sqlite3` CLI.
 
+```
+"github.com/asg017/sqlite-path"
+"https://github.com/asg017/sqlite-path"
+"gh:asg017/sqlite-path"
+"github.com/asg017/sqlite-path@v1.2.1"
+"https://github.com/asg017/sqlite-path@v1.2.3"
+"gh:asg017/sqlite-path@v1.2.3"
+```
+
 ```toml
 [extensions]
 #"github.com/asg017/sqlite-path" = "v0.2.0-alpha.1"
@@ -19,6 +28,8 @@ The missing package manager for 3rd party SQLite extensions in the `sqlite3` CLI
 - [ ] platform dependent dylib lookup
 - [ ] binary distribution
 - [ ] gh action setup
+- [ ] upgrade
+- [ ] audit
 
 ```yaml
 - uses: asg017/setup-spm@v1
