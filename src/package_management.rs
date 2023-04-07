@@ -1,89 +1,64 @@
-use std::{collections::HashMap, io::Write};
+use std::collections::HashMap;
 
-use crate::spm::{SpmLock, SpmLockExtension, SpmPackageJson, SpmToml};
+use crate::spm::{ProjectDirectory, SpmLock, SpmLockExtension, SpmPackageJson, SpmToml};
 
 use clap::ArgMatches;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use flate2::read::GzDecoder;
-use serde::{Deserialize, Serialize};
 use std::io::BufReader;
 use tar::Archive;
 
 use toml_edit::{value, Document};
 
-#[derive(Serialize, Deserialize)]
-pub(crate) struct Config {
-    description: String,
-    extensions: ConfigExtensions,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct ConfigExtensions {
-    #[serde(flatten)]
-    extensions: HashMap<String, ConfigExtension>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ConfigExtension {
-    version: String,
-    url: String,
-    artifact: String,
-}
-pub fn init_command() -> Result<()> {
-    let cwd = std::env::current_dir()?;
-    let spm_toml = std::fs::metadata(cwd.join("spm.toml"));
-    let sqlite_ext_dir = std::fs::metadata(cwd.join("sqlite_extensions"));
-    if spm_toml.is_err() {
-        let ce = ConfigExtensions {
-            extensions: HashMap::new(),
-        };
-        let config = Config {
-            description: "boingo".to_owned(),
-            extensions: ce,
-        };
-        let mut f = std::fs::File::create(cwd.join("spm.toml")).unwrap();
-        let contents = toml::to_string(&config).unwrap();
-        f.write_all(contents.as_bytes()).unwrap();
+pub(crate) fn resolve_project_directory(matches: &ArgMatches) -> Result<ProjectDirectory> {
+    match matches.get_one::<String>("prefix") {
+        Some(base_directory) => Ok(ProjectDirectory::new(base_directory.into())),
+        None => Ok(ProjectDirectory::new(std::env::current_dir()?)),
     }
-    if sqlite_ext_dir.is_err() {
-        std::fs::create_dir(cwd.join("sqlite_extensions")).unwrap();
-        let mut f =
-            std::fs::File::create(cwd.join("sqlite_extensions").join(".gitignore")).unwrap();
-        f.write_all(b"*").unwrap();
+}
+pub fn init_command(matches: &ArgMatches) -> Result<()> {
+    let project = resolve_project_directory(matches)?;
+    if !project.spm_toml_exists() {
+        project.write_spm_toml_contents("\n[extensions]")?;
+    }
+    if !project.sqlite_extensions_exists() {
+        project.create_sqlite_extensions_dir()?;
+        project.write_in_sqlite_extensions(".gitignore".into(), "*")?
     }
     Ok(())
 }
 
 pub fn add_command(matches: &ArgMatches) -> Result<()> {
-    let url = matches.get_one::<String>("url").unwrap();
+    let url = matches
+        .get_one::<String>("url")
+        .context("url is a required argument")?;
     let artifact = matches.get_one::<String>("artifact");
-    let artifact = artifact.unwrap();
+    let artifact = artifact.expect("TODO optional version and artifacts");
 
-    let cwd = std::env::current_dir().unwrap();
+    let project = resolve_project_directory(matches)?;
 
-    let spm_toml_contents = std::fs::read_to_string(cwd.join("spm.toml")).unwrap();
-    let mut doc = spm_toml_contents.parse::<Document>().expect("invalid doc");
+    let spm_toml_contents = project.read_spm_toml_contents()?;
+    let mut doc = spm_toml_contents
+        .parse::<Document>()
+        .context("invalid spm.toml")?;
     doc["extensions"][url] = value(artifact);
-    std::fs::write(cwd.join("spm.toml"), doc.to_string()).unwrap();
+    project.write_spm_toml_contents(doc.to_string())?;
     Ok(())
 }
 
-pub fn install_command(_: &ArgMatches) -> Result<()> {
-    let cwd = std::env::current_dir().unwrap();
-    if !std::path::Path::exists(&cwd.join("spm.toml")) {
+pub fn install_command(matches: &ArgMatches) -> Result<()> {
+    let project = resolve_project_directory(matches)?;
+    if !project.spm_toml_exists() {
         println!("No spm.toml found in current directory, exiting.");
         std::process::exit(1);
     }
-    let sqlite_extensions_directory = cwd.join("sqlite_extensions");
 
-    if !sqlite_extensions_directory.exists() {
-        std::fs::create_dir(&sqlite_extensions_directory).ok();
+    if !project.sqlite_extensions_exists() {
+        project.create_sqlite_extensions_dir()?;
     }
 
-    //let spm_toml_contents = ;
-    let spm_lock: SpmLock =
-        serde_json::from_str(&std::fs::read_to_string(cwd.join("spm.lock")).unwrap()).unwrap();
+    let spm_lock: SpmLock = project.read_spm_lock()?;
 
     let os = spm_os_name(std::env::consts::OS);
     let arch = std::env::consts::ARCH;
@@ -95,12 +70,17 @@ pub fn install_command(_: &ArgMatches) -> Result<()> {
                 .platforms
                 .iter()
                 .find(|platform| platform.os == os && platform.cpu == arch);
-            let platform = platform.ok_or_else(|| anyhow!("asdf"))?;
+            let platform = platform.ok_or_else(|| {
+                anyhow!("No matching platform found for the current device ({os}-{arch})")
+            })?;
 
             let asset_name = &platform.asset_name;
             let url = format!("https://{name}/releases/download/{version}/{asset_name}");
             println!("downloading {url}");
-            let asset = ureq::get(url.as_str()).call().unwrap().into_reader();
+            let asset = ureq::get(url.as_str())
+                .call()
+                .with_context(|| format!("Error making request to {url}"))?
+                .into_reader();
             let buf_reader = BufReader::new(asset);
             let gz_decoder = GzDecoder::new(buf_reader);
             let mut archive = Archive::new(gz_decoder);
@@ -108,37 +88,42 @@ pub fn install_command(_: &ArgMatches) -> Result<()> {
             // Extract the file
             let entry = archive
                 .entries()
-                .unwrap()
+                .with_context(|| format!("Error finding entries in {asset_name}"))?
                 .filter_map(|entry| entry.ok())
-                .next(); //.next();
-                         //.find(|entry| entry.path().unwrap().to_str().unwrap() == "ulid0.dylib");
+                .next();
             entry
-                .unwrap()
-                .unpack_in(&sqlite_extensions_directory)
-                .unwrap();
+                .with_context(|| format!("could not unpack tar.gz entry for {}", asset_name))?
+                .unpack_in(&project.sqlite_extensions_path())
+                .with_context(|| {
+                    format!(
+                        "could not unpack tar.gz entry into {}",
+                        project.sqlite_extensions_path().display()
+                    )
+                })?;
         }
     }
     Ok(())
 }
 
-pub fn generate_lockfile(spm_toml: SpmToml) -> SpmLock {
+pub fn generate_lockfile(spm_toml: &SpmToml) -> Result<SpmLock> {
     let mut extensions = HashMap::new();
-    for (extension_name, version) in spm_toml.extensions {
+    for (extension_name, version) in &spm_toml.extensions {
         let resolved_url = format!("https://{extension_name}");
         let resolved_spm_json =
             format!("https://{extension_name}/releases/download/{version}/spm.json");
 
         let integrity = "".to_owned();
 
-        let spm_json: SpmPackageJson = ureq::get(resolved_spm_json.as_str())
+        let url = resolved_spm_json.as_str();
+        let spm_json: SpmPackageJson = ureq::get(url)
             .call()
-            .unwrap()
+            .with_context(|| format!("Could not fetch spm.json file at {url}"))?
             .into_json()
-            .unwrap();
+            .with_context(|| format!("Could not decode fetched spm.json into JSON, from {url}"))?;
         extensions.insert(
-            extension_name,
+            extension_name.clone(),
             SpmLockExtension {
-                version,
+                version: version.clone(),
                 resolved_url,
                 resolved_spm_json,
                 integrity,
@@ -146,21 +131,15 @@ pub fn generate_lockfile(spm_toml: SpmToml) -> SpmLock {
             },
         );
     }
-    SpmLock { extensions }
+    Ok(SpmLock { extensions })
 }
 
-pub fn generate_command() -> Result<()> {
-    let cwd = std::env::current_dir().unwrap();
+pub fn generate_command(matches: &ArgMatches) -> Result<()> {
+    let project = resolve_project_directory(matches)?;
+    let spm_toml = project.read_spm_toml()?;
 
-    let spm_toml_contents = std::fs::read_to_string(cwd.join("spm.toml")).unwrap();
-    let spm_toml: SpmToml = toml::from_str(&spm_toml_contents).unwrap();
-
-    let lockfile = generate_lockfile(spm_toml);
-    std::fs::write(
-        cwd.join("spm.lock"),
-        serde_json::to_vec_pretty(&lockfile).unwrap(),
-    )
-    .unwrap();
+    let lockfile = generate_lockfile(&spm_toml)?;
+    project.write_spm_lock(lockfile)?;
     Ok(())
 }
 

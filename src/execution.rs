@@ -1,44 +1,40 @@
 use std::process::Stdio;
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use clap::ArgMatches;
 
-pub fn activate_command() -> Result<()> {
+use crate::package_management::resolve_project_directory;
+
+pub fn activate_command(matches: &ArgMatches) -> Result<()> {
+    let project_directory = resolve_project_directory(matches)?;
     println!(
         "export DYLD_LIBRARY_PATH={}",
-        std::env::current_dir()
-            .unwrap()
-            .join("sqlite_extensions")
-            .to_string_lossy()
+        project_directory.sqlite_extensions_path().to_string_lossy()
     );
     Ok(())
 }
-pub fn deactivate_command() -> Result<()> {
+pub fn deactivate_command(_matches: &ArgMatches) -> Result<()> {
     println!("unset DYLD_LIBRARY_PATH");
     Ok(())
 }
 
 pub fn run_command(matches: &ArgMatches) -> Result<()> {
-    let mut x = matches
-        .get_many::<String>("please")
-        .unwrap()
+    let project_directory = resolve_project_directory(matches)?;
+    let command = matches
+        .get_many::<String>("command")
+        .context("command arguments required")?
         .collect::<Vec<_>>();
-
-    let mut cmd = std::process::Command::new(x[0])
-        .args(&mut x[1..])
+    let (program, arguments) = command.split_first().ok_or_else(|| anyhow!("asdf"))?;
+    let mut cmd = std::process::Command::new(program)
+        .args(arguments)
         .env(
             "DYLD_LIBRARY_PATH",
-            std::env::current_dir()
-                .unwrap()
-                .join("sqlite_extensions")
-                .as_os_str(),
+            project_directory.sqlite_extensions_path().as_os_str(),
         )
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .spawn()
-        //.output()
-        .expect("failed to execute process");
+        .spawn()?;
 
-    let status = cmd.wait();
-    std::process::exit(status.unwrap().code().unwrap());
+    let status = cmd.wait()?;
+    std::process::exit(status.code().map_or(1, |code| code));
 }

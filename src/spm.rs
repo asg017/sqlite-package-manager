@@ -54,6 +54,85 @@ pub struct SpmLockExtension {
     pub spm_json: SpmPackageJson,
 }
 
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+
+pub(crate) struct ProjectDirectory {
+    spm_toml_path: PathBuf,
+    spm_lock_path: PathBuf,
+    sqlite_extensions_path: PathBuf,
+}
+impl ProjectDirectory {
+    pub fn new(base_directory: PathBuf) -> ProjectDirectory {
+        let spm_toml_path = base_directory.join("spm.toml");
+        let spm_lock_path = base_directory.join("spm.lock");
+        let sqlite_extensions_path = base_directory.join("sqlite_extensions");
+        ProjectDirectory {
+            spm_toml_path,
+            spm_lock_path,
+            sqlite_extensions_path,
+        }
+    }
+    pub fn sqlite_extensions_path(&self) -> std::path::PathBuf {
+        self.sqlite_extensions_path.clone()
+    }
+    pub fn spm_toml_exists(&self) -> bool {
+        std::path::Path::exists(&self.spm_toml_path)
+    }
+    pub fn _spm_lock_exists(&self) -> bool {
+        std::path::Path::exists(&self.spm_lock_path)
+    }
+    pub fn sqlite_extensions_exists(&self) -> bool {
+        std::path::Path::exists(&self.sqlite_extensions_path)
+    }
+    pub fn create_sqlite_extensions_dir(&self) -> Result<()> {
+        std::fs::create_dir(&self.sqlite_extensions_path).with_context(|| {
+            format!(
+                "Could not create new directory at {}",
+                self.sqlite_extensions_path.display()
+            )
+        })?;
+        Ok(())
+    }
+    pub fn read_spm_toml(&self) -> Result<SpmToml> {
+        let contents = self.read_spm_toml_contents()?;
+        let spm_toml = toml::from_str(&contents)
+            .with_context(|| format!("File at {} is not valid", "TODO"))?;
+        Ok(spm_toml)
+    }
+    pub fn read_spm_lock(&self) -> Result<SpmLock> {
+        let contents = self.read_spm_lock_contents()?;
+        let spm_toml = toml::from_str(&contents)
+            .with_context(|| format!("File at {} is not valid", "TODO"))?;
+        Ok(spm_toml)
+    }
+    pub fn read_spm_toml_contents(&self) -> Result<String> {
+        Ok(std::fs::read_to_string(&self.spm_toml_path)?)
+    }
+    pub fn read_spm_lock_contents(&self) -> Result<String> {
+        Ok(std::fs::read_to_string(&self.spm_lock_path)?)
+    }
+    pub fn write_spm_toml_contents<C: AsRef<[u8]>>(&self, contents: C) -> Result<()> {
+        std::fs::write(&self.spm_toml_path, contents)
+            .with_context(|| format!("could not write to {}", &self.spm_toml_path.display()))
+    }
+    pub fn write_spm_lock(&self, lock: SpmLock) -> Result<()> {
+        let contents = serde_json::to_vec_pretty(&lock).context("Failed to serialize spm.lock")?;
+        std::fs::write(&self.spm_toml_path, contents)
+            .with_context(|| format!("could not write to {}", &self.spm_toml_path.display()))
+    }
+    pub fn write_in_sqlite_extensions<C: AsRef<[u8]>>(
+        &self,
+        path: std::path::PathBuf,
+        contents: C,
+    ) -> Result<()> {
+        let full_path = self.sqlite_extensions_path.join(path);
+        std::fs::write(&full_path, contents)
+            .with_context(|| format!("could not write to {}", full_path.display()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
