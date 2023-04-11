@@ -2,6 +2,16 @@
 
 The missing package manager for 3rd party SQLite extensions in the `sqlite3` CLI.
 
+- `init` - just make the spm.toml
+- `install [package]`
+  - if package: add to spm.toml, refresh spm.lock, download
+  - if no package: refresh spm.lock, download
+- `add pkg` ???
+- `rm pkg` ???
+- `ci`
+  - if spm.toml and spm.lock don't match, exit
+  - install from spm.lock,
+
 ```
 "github.com/asg017/sqlite-path"
 "https://github.com/asg017/sqlite-path"

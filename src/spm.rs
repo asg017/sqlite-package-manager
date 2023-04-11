@@ -51,9 +51,14 @@ pub struct SpmLock {
     pub extensions: HashMap<String, SpmLockExtension>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SpmLockExtension {
+    GithubRelease(GithubReleaseExtension),
+}
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SpmLockExtension {
+pub struct GithubReleaseExtension {
     pub version: String,
     pub artifacts: Option<Vec<String>>,
     #[serde(rename = "resolved_url")]
@@ -109,13 +114,13 @@ impl ProjectDirectory {
     pub fn read_spm_toml(&self) -> Result<SpmToml> {
         let contents = self.read_spm_toml_contents()?;
         let spm_toml = toml::from_str(&contents)
-            .with_context(|| format!("File at {} is not valid", "TODO"))?;
+            .with_context(|| format!("spm.toml at {} is not valid", "TODO"))?;
         Ok(spm_toml)
     }
     pub fn read_spm_lock(&self) -> Result<SpmLock> {
         let contents = self.read_spm_lock_contents()?;
-        let spm_toml = toml::from_str(&contents)
-            .with_context(|| format!("File at {} is not valid", "TODO"))?;
+        let spm_toml = serde_json::from_str(&contents)
+            .with_context(|| format!("spm.lock at {} is not valid", "TODO"))?;
         Ok(spm_toml)
     }
     pub fn read_spm_toml_contents(&self) -> Result<String> {
@@ -130,8 +135,8 @@ impl ProjectDirectory {
     }
     pub fn write_spm_lock(&self, lock: SpmLock) -> Result<()> {
         let contents = serde_json::to_vec_pretty(&lock).context("Failed to serialize spm.lock")?;
-        std::fs::write(&self.spm_toml_path, contents)
-            .with_context(|| format!("could not write to {}", &self.spm_toml_path.display()))
+        std::fs::write(&self.spm_lock_path, contents)
+            .with_context(|| format!("could not write to {}", &self.spm_lock_path.display()))
     }
     pub fn write_in_sqlite_extensions<C: AsRef<[u8]>>(
         &self,
@@ -238,7 +243,11 @@ mod tests {
 
         let p: SpmLock = serde_json::from_str(data).unwrap();
         let ext1 = p.extensions.get("github.com/asg017/sqlite-path").unwrap();
-        assert_eq!(ext1.version, "vX.X.X");
+        match ext1 {
+            SpmLockExtension::GithubRelease(gh) => {
+                assert_eq!(gh.version, "vX.X.X");
+            }
+        };
     }
 
     #[test]

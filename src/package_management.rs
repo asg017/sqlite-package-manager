@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::spm::{
-    ExtensionDefinition, ProjectDirectory, SpmLock, SpmLockExtension, SpmPackageJson, SpmToml,
+    ExtensionDefinition, GithubReleaseExtension, ProjectDirectory, SpmLock, SpmLockExtension,
+    SpmPackageJson, SpmToml,
 };
 
 use clap::ArgMatches;
@@ -23,10 +24,13 @@ pub trait PackageResolver {
 pub(crate) fn resolve_project_directory(matches: &ArgMatches) -> Result<ProjectDirectory> {
     match matches.get_one::<String>("prefix") {
         Some(base_directory) => Ok(ProjectDirectory::new(base_directory.into())),
+        // TODO traverse up the folder tree to find nearest directory with a spm.toml
         None => Ok(ProjectDirectory::new(std::env::current_dir()?)),
     }
 }
+
 pub fn init_command(matches: &ArgMatches) -> Result<()> {
+    // TODO after spm.toml lookup traversal is added, change this to only use --prefix or CWD
     let project = resolve_project_directory(matches)?;
     if !project.spm_toml_exists() {
         project.write_spm_toml_contents("\n[extensions]")?;
@@ -56,6 +60,9 @@ pub fn add_command(matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+// spm install github.com/asg017/sqlite-http@v0.1.0-alpha.2
+// spm install https://github.com/asg017/sqlite-http@v0.1.0-alpha.2
+// spm install gh:asg017/sqlite-http@v0.1.0-alpha.2
 pub fn install_command(matches: &ArgMatches) -> Result<()> {
     let project = resolve_project_directory(matches)?;
     if !project.spm_toml_exists() {
@@ -68,47 +75,54 @@ pub fn install_command(matches: &ArgMatches) -> Result<()> {
     }
 
     let spm_lock: SpmLock = project.read_spm_lock()?;
+    println!("{:?}", spm_lock);
 
     let os = spm_os_name(std::env::consts::OS);
     let arch = std::env::consts::ARCH;
 
     for (name, extension) in spm_lock.extensions {
-        let version = extension.version;
-        for (_, e) in extension.spm_json.extensions {
-            let platform = e
-                .platforms
-                .iter()
-                .find(|platform| platform.os == os && platform.cpu == arch);
-            let platform = platform.ok_or_else(|| {
-                anyhow!("No matching platform found for the current device ({os}-{arch})")
-            })?;
+        match extension {
+            SpmLockExtension::GithubRelease(extension) => {
+                let version = extension.version;
+                for (_, e) in extension.spm_json.extensions {
+                    let platform = e
+                        .platforms
+                        .iter()
+                        .find(|platform| platform.os == os && platform.cpu == arch);
+                    let platform = platform.ok_or_else(|| {
+                        anyhow!("No matching platform found for the current device ({os}-{arch})")
+                    })?;
 
-            let asset_name = &platform.asset_name;
-            let url = format!("https://{name}/releases/download/{version}/{asset_name}");
-            println!("downloading {url}");
-            let asset = ureq::get(url.as_str())
-                .call()
-                .with_context(|| format!("Error making request to {url}"))?
-                .into_reader();
-            let buf_reader = BufReader::new(asset);
-            let gz_decoder = GzDecoder::new(buf_reader);
-            let mut archive = Archive::new(gz_decoder);
+                    let asset_name = &platform.asset_name;
+                    let url = format!("https://{name}/releases/download/{version}/{asset_name}");
+                    println!("downloading {url}");
+                    let asset = ureq::get(url.as_str())
+                        .call()
+                        .with_context(|| format!("Error making request to {url}"))?
+                        .into_reader();
+                    let buf_reader = BufReader::new(asset);
+                    let gz_decoder = GzDecoder::new(buf_reader);
+                    let mut archive = Archive::new(gz_decoder);
 
-            // Extract the file
-            let entry = archive
-                .entries()
-                .with_context(|| format!("Error finding entries in {asset_name}"))?
-                .filter_map(|entry| entry.ok())
-                .next();
-            entry
-                .with_context(|| format!("could not unpack tar.gz entry for {}", asset_name))?
-                .unpack_in(&project.sqlite_extensions_path())
-                .with_context(|| {
-                    format!(
-                        "could not unpack tar.gz entry into {}",
-                        project.sqlite_extensions_path().display()
-                    )
-                })?;
+                    // Extract the file
+                    let entry = archive
+                        .entries()
+                        .with_context(|| format!("Error finding entries in {asset_name}"))?
+                        .filter_map(|entry| entry.ok())
+                        .next();
+                    entry
+                        .with_context(|| {
+                            format!("could not unpack tar.gz entry for {}", asset_name)
+                        })?
+                        .unpack_in(&project.sqlite_extensions_path())
+                        .with_context(|| {
+                            format!(
+                                "could not unpack tar.gz entry into {}",
+                                project.sqlite_extensions_path().display()
+                            )
+                        })?;
+                }
+            }
         }
     }
     Ok(())
@@ -137,14 +151,14 @@ pub fn generate_lockfile(spm_toml: &SpmToml) -> Result<SpmLock> {
             .with_context(|| format!("Could not decode fetched spm.json into JSON, from {url}"))?;
         extensions.insert(
             extension_name.clone(),
-            SpmLockExtension {
+            SpmLockExtension::GithubRelease(GithubReleaseExtension {
                 version: version.clone(),
                 artifacts,
                 resolved_url,
                 resolved_spm_json,
                 integrity,
                 spm_json,
-            },
+            }),
         );
     }
     Ok(SpmLock {

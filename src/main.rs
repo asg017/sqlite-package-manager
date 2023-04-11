@@ -53,6 +53,7 @@ fn main() {
         _ => Err(anyhow!("asdf")),
     };
     if result.is_err() {
+        println!("{:?}", result);
         std::process::exit(1);
     }
 }
