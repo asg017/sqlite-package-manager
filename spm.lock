@@ -1,7 +1,7 @@
 {
   "version": 0,
   "extensions": {
-    "github.com/asg017/sqlite-http": {
+    "https://github.com/asg017/sqlite-http": {
       "version": "v0.1.0-alpha.2",
       "artifacts": null,
       "resolved_url": "https://github.com/asg017/sqlite-http",
@@ -33,56 +33,6 @@
                 "asset_name": "sqlite-http-v0.1.0-alpha.2-windows-x86_64.tar.gz",
                 "asset_sha256": "dd17d0066224f112e4d4b9b68c5db7578caebc77e8fe5338044dba6d30a68406",
                 "asset_md5": "in2IeQdnBJGn9ZH8Qh5yaQ=="
-              }
-            ]
-          }
-        }
-      }
-    },
-    "github.com/asg017/sqlite-vss": {
-      "version": "v0.0.2",
-      "artifacts": null,
-      "resolved_url": "https://github.com/asg017/sqlite-vss",
-      "resolved_spm_json": "https://github.com/asg017/sqlite-vss/releases/download/v0.0.2/spm.json",
-      "integrity": "",
-      "spm_json": {
-        "version": 0,
-        "extensions": {
-          "vss0": {
-            "description": "",
-            "platforms": [
-              {
-                "os": "linux",
-                "cpu": "x86_64",
-                "asset_name": "sqlite-vss-v0.0.2-vss0-linux-x86_64.tar.gz",
-                "asset_sha256": "66ae2b2f5499883787933063642cb74a986e6294e1164b60703fc606f08cc6e3",
-                "asset_md5": "QG1pKxViBVd1suzqSCMUIQ=="
-              },
-              {
-                "os": "darwin",
-                "cpu": "x86_64",
-                "asset_name": "sqlite-vss-v0.0.2-vss0-darwin-x86_64.tar.gz",
-                "asset_sha256": "6ac2b002d543a214a277b1042b4143da12b7fd708a57565a8463e581564fb528",
-                "asset_md5": "spNKh4mC7IE3pLdJjnqkbg=="
-              }
-            ]
-          },
-          "vector0": {
-            "description": "",
-            "platforms": [
-              {
-                "os": "linux",
-                "cpu": "x86_64",
-                "asset_name": "sqlite-vss-v0.0.2-vector0-linux-x86_64.tar.gz",
-                "asset_sha256": "1efc38057996f6c6ecabca5317fee0ca37fc4ecb2e954278f718a886a2f8a53e",
-                "asset_md5": "13kyDaqc8Gin+/gBhOUqpg=="
-              },
-              {
-                "os": "darwin",
-                "cpu": "x86_64",
-                "asset_name": "sqlite-vss-v0.0.2-vector0-darwin-x86_64.tar.gz",
-                "asset_sha256": "8c383ca7ef1cb6acda36db967477efdb9cb8e82d1e4d57bd52dc2299020dde0f",
-                "asset_md5": "uXCrJVl48G7EKCcT2w00mw=="
               }
             ]
           }

@@ -1,14 +1,12 @@
-mod execution;
-mod package_management;
 mod spm;
 
-use crate::{execution::*, package_management::*};
+use crate::spm::Project;
 
-use anyhow::anyhow;
-use clap::{Arg, ArgAction, Command};
+use anyhow::{anyhow, Context, Result};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 
-fn main() {
-    let matches = Command::new("sqlite-package-manager")
+fn command() -> Command {
+    Command::new("sqlite-package-manager")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Alex Garcia")
         .about("The missing package manager for SQLite extensions and sqlite3.")
@@ -24,7 +22,7 @@ fn main() {
             Command::new("add")
                 .about("Add a SQLite extension to your spm project.")
                 .arg(Arg::new("url").required(true))
-                .arg(Arg::new("artifact").required(false)),
+                .arg(Arg::new("artifacts").required(false)),
         )
         .subcommand(Command::new("generate").about("gen"))
         .subcommand(Command::new("install").about("Install a SQLite extension"))
@@ -41,17 +39,60 @@ fn main() {
             Command::new("deactivate")
                 .about("Deactivate a spm project to your shell. Use with command substitution."),
         )
-        .get_matches();
-    let result = match matches.subcommand() {
-        Some(("init", matches)) => init_command(matches),
-        Some(("activate", matches)) => activate_command(matches),
-        Some(("deactivate", matches)) => deactivate_command(matches),
-        Some(("run", matches)) => run_command(matches),
-        Some(("add", matches)) => add_command(matches),
-        Some(("generate", matches)) => generate_command(matches),
-        Some(("install", matches)) => install_command(matches),
-        _ => Err(anyhow!("asdf")),
-    };
+}
+
+fn execute_matches(matches: ArgMatches) -> Result<()> {
+    match matches.subcommand() {
+        Some(("init", matches)) => {
+            // TODO after spm.toml lookup traversal is added, change this to only use --prefix or CWD
+            // bc no spm.toml will be available??
+            let project = Project::resolve_from_args(matches)?;
+            project.command_init()
+        }
+        Some(("activate", matches)) => {
+            let project = Project::resolve_from_args(matches)?;
+            project.command_activate()
+        }
+        Some(("deactivate", matches)) => {
+            let project = Project::resolve_from_args(matches)?;
+            project.command_deactivate()
+        }
+        Some(("run", matches)) => {
+            let project = Project::resolve_from_args(matches)?;
+            let command = matches
+                .get_many::<String>("command")
+                .context("command arguments required")?
+                .collect::<Vec<_>>();
+            let (program, arguments) = command
+                .split_first()
+                .ok_or_else(|| anyhow!("at least one argument is required"))?;
+            project.command_run(program, arguments)
+        }
+        Some(("add", matches)) => {
+            let url = matches
+                .get_one::<String>("url")
+                .context("url is a required argument")?;
+            let artifacts: Option<Vec<String>> = matches
+                .get_many::<String>("artifacts")
+                .map(|v| v.into_iter().map(|v| v.to_string()).collect());
+
+            let project = Project::resolve_from_args(matches)?;
+            project.command_add(url, artifacts)
+        }
+        Some(("generate", matches)) => {
+            let project = Project::resolve_from_args(matches)?;
+            project.command_generate()
+        }
+        Some(("install", matches)) => {
+            let project = Project::resolve_from_args(matches)?;
+            project.command_install()
+        }
+        _ => Err(anyhow!("unknown subcommand")),
+    }
+}
+fn main() {
+    let matches = command().get_matches();
+    let result = execute_matches(matches);
     if result.is_err() {
         println!("{:?}", result);
         std::process::exit(1);

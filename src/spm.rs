@@ -1,8 +1,16 @@
+use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, ffi::OsString, process::Stdio, str::Split};
+
+use anyhow::{anyhow, Context, Result};
+use flate2::read::GzDecoder;
+use std::io::BufReader;
+use tar::Archive;
+use url::Url;
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// spm.json
 pub struct SpmPackageJson {
     pub version: i64,
     pub extensions: HashMap<String, SpmPackageJsonExtension>,
@@ -10,6 +18,7 @@ pub struct SpmPackageJson {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// descibes a single extension in spm.json, under .extensions
 pub struct SpmPackageJsonExtension {
     pub description: String,
     pub platforms: Vec<SpmPackageJsonPlatform>,
@@ -28,10 +37,22 @@ pub struct SpmPackageJsonPlatform {
     pub asset_md5: String,
 }
 
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+/// spm.toml
+pub struct SpmToml {
+    pub description: String,
+    pub preload_directories: Option<Vec<String>>,
+    pub extensions: HashMap<String, SpmTomlExtensionDefinition>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum ExtensionDefinition {
+/// definition of an extension in spm.toml, either a version string or object
+pub enum SpmTomlExtensionDefinition {
+    // project = "v1.2.3"
     Version(String),
+    // project = { version="v1.2.3", artifacts=["abc0", "xyz0"] }
     Definition {
         version: String,
         artifacts: Vec<String>,
@@ -39,13 +60,7 @@ pub enum ExtensionDefinition {
 }
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SpmToml {
-    pub description: String,
-    pub extensions: HashMap<String, ExtensionDefinition>,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// spm.lock, serialized as JSON
 pub struct SpmLock {
     pub version: i32,
     pub extensions: HashMap<String, SpmLockExtension>,
@@ -69,40 +84,356 @@ pub struct GithubReleaseExtension {
     #[serde(rename = "spm_json")]
     pub spm_json: SpmPackageJson,
 }
+type Platform = Option<(String, String)>;
+impl GithubReleaseExtension {
+    pub(crate) fn download_platform(&self, platform: Platform, project: &Project) -> Result<()> {
+        let (os, arch) = match platform {
+            Some((os, arch)) => (os, arch),
+            None => (
+                spm_os_name(std::env::consts::OS).to_owned(),
+                std::env::consts::ARCH.to_owned(),
+            ),
+        };
+        for (_, e) in &self.spm_json.extensions {
+            let platform = e
+                .platforms
+                .iter()
+                .find(|platform| platform.os == os && platform.cpu == arch);
+            let platform = platform.ok_or_else(|| {
+                anyhow!("No matching platform found for the current device ({os}-{arch})")
+            })?;
+
+            let asset_name = &platform.asset_name;
+            let url = format!(
+                "{}/releases/download/{}/{asset_name}",
+                self.resolved_url, self.version
+            );
+            println!("downloading {url} ...");
+            let asset = ureq::get(url.as_str())
+                .call()
+                .with_context(|| format!("Error making request to {url}"))?
+                .into_reader();
+            let buf_reader = BufReader::new(asset);
+            let gz_decoder = GzDecoder::new(buf_reader);
+            let mut archive = Archive::new(gz_decoder);
+
+            // Extract the file
+            let entry = archive
+                .entries()
+                .with_context(|| format!("Error finding entries in {asset_name}"))?
+                .filter_map(|entry| entry.ok())
+                .next();
+            entry
+                .with_context(|| format!("could not unpack tar.gz entry for {}", asset_name))?
+                .unpack_in(&project.sqlite_extensions_path())
+                .with_context(|| {
+                    format!(
+                        "could not unpack tar.gz entry into {}",
+                        project.sqlite_extensions_path().display()
+                    )
+                })?;
+        }
+        Ok(())
+    }
+}
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+fn github_parse_path(mut parts: Split<char>) -> Result<GithubRelease> {
+    let owner = parts
+        .next()
+        .ok_or_else(|| anyhow!("github owner name required"))?
+        .to_owned();
+    let repo = parts
+        .next()
+        .ok_or_else(|| anyhow!("github repo name required"))?
+        .to_owned();
+    if let Some((repo, version)) = repo.split_once('@') {
+        Ok(GithubRelease {
+            owner,
+            repo: repo.to_owned(),
+            version: Some(version.to_owned()),
+        })
+    } else {
+        Ok(GithubRelease {
+            owner,
+            repo: repo.to_owned(),
+            version: None,
+        })
+    }
+}
 
-pub(crate) struct ProjectDirectory {
+// https://github.com/owner/repo -> GithubReleaseResolver
+// github.com/owner/repo -> GithubReleaseResolver
+// gh:owner/repo -> GithubReleaseResolver
+fn determine_package_resolver(name: &str) -> Result<Box<dyn PackageResolver>> {
+    if let Ok(url) = Url::parse(name) {
+        return match url.host_str() {
+            Some("github.com") => {
+                let path_segments = url.path_segments().ok_or_else(|| anyhow!("wut"))?;
+                Ok(Box::new(github_parse_path(path_segments)?))
+            }
+            Some(_) => Err(anyhow!("todo")),
+            None => Err(anyhow!("todo")),
+        };
+    }
+    if let Some(reference) = name.strip_prefix("gh:") {
+        let parts = reference.split('/');
+        return Ok(Box::new(github_parse_path(parts)?));
+    }
+    if let Some(reference) = name.strip_prefix("github.com/") {
+        let parts = reference.split('/');
+        return Ok(Box::new(github_parse_path(parts)?));
+    }
+    Err(anyhow!("todo"))
+}
+pub trait PackageResolver {
+    fn version_from_reference(&self) -> Result<String>;
+    fn toml_name(&self) -> String;
+    fn latest_version(&self) -> Result<String>;
+    fn generate_lock(&self, definition: &SpmTomlExtensionDefinition) -> Result<SpmLockExtension>;
+}
+
+struct GithubRelease {
+    owner: String,
+    repo: String,
+    version: Option<String>,
+}
+
+impl PackageResolver for GithubRelease {
+    fn version_from_reference(&self) -> Result<String> {
+        match &self.version {
+            Some(v) => Ok(v.to_owned()),
+            None => self.latest_version(),
+        }
+    }
+    fn toml_name(&self) -> String {
+        format!("https://github.com/{}/{}", self.owner, self.repo)
+    }
+    fn latest_version(&self) -> Result<String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases/latest",
+            self.owner, self.repo
+        );
+        let response: serde_json::Value = ureq::get(url.as_str())
+            .call()
+            .with_context(|| format!("call to {url} failed"))?
+            .into_json()
+            .with_context(|| format!("request did not return proper JSON: {url}"))?;
+
+        Ok(response
+            .get("tag_name")
+            .context("Expected 'tag_name' in JSON response")?
+            .as_str()
+            .context("Expected 'tag_name' value to be a string")?
+            .to_owned())
+    }
+    fn generate_lock(&self, definition: &SpmTomlExtensionDefinition) -> Result<SpmLockExtension> {
+        let (version, artifacts) = match definition {
+            SpmTomlExtensionDefinition::Version(version) => (version.clone(), None),
+            SpmTomlExtensionDefinition::Definition { version, artifacts } => {
+                (version.clone(), Some(artifacts.clone()))
+            }
+        };
+        let resolved_url = format!("https://github.com/{}/{}", self.owner, self.repo);
+        let resolved_spm_json = format!(
+            "https://github.com/{}/{}/releases/download/{version}/spm.json",
+            self.owner, self.repo
+        );
+
+        let integrity = "".to_owned();
+
+        let url = resolved_spm_json.as_str();
+        let spm_json: SpmPackageJson = ureq::get(url)
+            .call()
+            .with_context(|| format!("Could not fetch spm.json file at {url}"))?
+            .into_json()
+            .with_context(|| format!("Could not decode fetched spm.json into JSON, from {url}"))?;
+
+        Ok(SpmLockExtension::GithubRelease(GithubReleaseExtension {
+            version,
+            artifacts,
+            resolved_url,
+            resolved_spm_json,
+            integrity,
+            spm_json,
+        }))
+    }
+}
+
+fn spm_os_name(os: &str) -> &str {
+    if os == "macos" {
+        "darwin"
+    } else {
+        os
+    }
+}
+
+pub(crate) struct Project {
     spm_toml_path: PathBuf,
     spm_lock_path: PathBuf,
     sqlite_extensions_path: PathBuf,
 }
-impl ProjectDirectory {
-    pub fn new(base_directory: PathBuf) -> ProjectDirectory {
+
+use toml_edit::{value, Array, Document, Item, Table};
+
+#[cfg(target_os = "linux")]
+const LIBRARY_PATH_ENV_VAR: &str = "LD_LIBRARY_PATH";
+#[cfg(target_os = "macos")]
+const LIBRARY_PATH_ENV_VAR: &str = "DYLD_LIBRARY_PATH";
+#[cfg(target_os = "windows")]
+const LIBRARY_PATH_ENV_VAR: &str = "PATH";
+
+impl Project {
+    pub fn new(base_directory: PathBuf) -> Project {
         let spm_toml_path = base_directory.join("spm.toml");
         let spm_lock_path = base_directory.join("spm.lock");
         let sqlite_extensions_path = base_directory.join("sqlite_extensions");
-        ProjectDirectory {
+        Project {
             spm_toml_path,
             spm_lock_path,
             sqlite_extensions_path,
         }
     }
-    pub fn sqlite_extensions_path(&self) -> std::path::PathBuf {
+    pub fn resolve_from_args(matches: &ArgMatches) -> Result<Project> {
+        match matches.get_one::<String>("prefix") {
+            Some(base_directory) => Ok(Project::new(base_directory.into())),
+            // TODO traverse up the folder tree to find nearest directory with a spm.toml
+            None => Ok(Project::new(std::env::current_dir()?)),
+        }
+    }
+    /// returns a colon-seperated string of directory to "preload" libraries from.
+    /// Meant to overwrite LIBRARY_PATH_ENV_VAR (LD_LIBRARY_PATH, DYLD_LIBRARY_PATH, etc.)
+    fn resolve_library_path(&self) -> Result<OsString> {
+        match std::env::var_os(LIBRARY_PATH_ENV_VAR) {
+            Some(paths) => {
+                let mut paths = std::env::split_paths(&paths).collect::<Vec<_>>();
+                paths.push(self.sqlite_extensions_path());
+                Ok(std::env::join_paths(paths)
+                    .context("Invalid path, is there a semicolor ':' somewhere in a path?")?)
+            }
+            None => Ok(self.sqlite_extensions_path().into()),
+        }
+    }
+
+    fn install(&self, platform: Platform) -> Result<()> {
+        if !self.spm_toml_exists() {
+            println!("No spm.toml found in current directory, exiting.");
+            std::process::exit(1);
+        }
+
+        if !self.sqlite_extensions_exists() {
+            self.create_sqlite_extensions_dir()?;
+        }
+
+        let spm_lock: SpmLock = self.read_spm_lock()?;
+        for (name, extension) in spm_lock.extensions {
+            match extension {
+                SpmLockExtension::GithubRelease(extension) => {
+                    extension.download_platform(platform.clone(), self)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn command_activate(&self) -> Result<()> {
+        let library_path = self.resolve_library_path()?;
+        println!(
+            "export {}={}",
+            LIBRARY_PATH_ENV_VAR,
+            library_path.to_string_lossy()
+        );
+        Ok(())
+    }
+    pub fn command_deactivate(&self) -> Result<()> {
+        // TODO
+        println!("unset {}", LIBRARY_PATH_ENV_VAR);
+        Ok(())
+    }
+    pub fn command_run(&self, program: &str, arguments: &[&String]) -> Result<()> {
+        let mut cmd = std::process::Command::new(program)
+            .args(arguments)
+            .env(LIBRARY_PATH_ENV_VAR, self.resolve_library_path()?)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+
+        let status = cmd.wait()?;
+        std::process::exit(status.code().map_or(1, |code| code));
+    }
+    pub fn command_init(&self) -> Result<()> {
+        if !self.spm_toml_exists() {
+            self.write_spm_toml_contents("\n[extensions]")?;
+        }
+        if !self.sqlite_extensions_exists() {
+            self.create_sqlite_extensions_dir()?;
+            self.write_in_sqlite_extensions(".gitignore".into(), "*")?
+        }
+        Ok(())
+    }
+
+    // TODO standardize os/arch
+    pub fn command_install(&self) -> Result<()> {
+        self.install(None)
+    }
+    pub fn command_add(&self, url: &str, artifacts: Option<Vec<String>>) -> Result<()> {
+        let pkg_resolver = determine_package_resolver(url)?;
+        let version = pkg_resolver.version_from_reference()?;
+
+        let spm_toml_contents = self.read_spm_toml_contents()?;
+        let mut doc = spm_toml_contents
+            .parse::<Document>()
+            .context("invalid spm.toml")?;
+
+        doc["extensions"][pkg_resolver.toml_name().as_str()] = match artifacts {
+            Some(artifacts) => {
+                let mut t = Table::new();
+                t["version"] = value(version);
+                t["artifacts"] = value(Array::from_iter(artifacts));
+                Item::Table(t)
+            }
+            None => value(version),
+        };
+
+        self.write_spm_toml_contents(doc.to_string())?;
+
+        self.generate_lockfile()?;
+        self.install(None)?;
+        Ok(())
+    }
+
+    fn generate_lockfile(&self) -> Result<()> {
+        let spm_toml = self.read_spm_toml()?;
+        let mut extensions = HashMap::new();
+        for (extension_name, definition) in &spm_toml.extensions {
+            let pkg_resolver = determine_package_resolver(extension_name)?;
+            let lock = pkg_resolver.generate_lock(definition)?;
+            extensions.insert(extension_name.clone(), lock);
+        }
+        self.write_spm_lock(SpmLock {
+            version: 0,
+            extensions,
+        })?;
+        Ok(())
+    }
+    pub fn command_generate(&self) -> Result<()> {
+        self.generate_lockfile()
+    }
+
+    fn sqlite_extensions_path(&self) -> std::path::PathBuf {
         self.sqlite_extensions_path.clone()
     }
-    pub fn spm_toml_exists(&self) -> bool {
+    fn spm_toml_exists(&self) -> bool {
         std::path::Path::exists(&self.spm_toml_path)
     }
-    pub fn _spm_lock_exists(&self) -> bool {
+    fn _spm_lock_exists(&self) -> bool {
         std::path::Path::exists(&self.spm_lock_path)
     }
-    pub fn sqlite_extensions_exists(&self) -> bool {
+    fn sqlite_extensions_exists(&self) -> bool {
         std::path::Path::exists(&self.sqlite_extensions_path)
     }
-    pub fn create_sqlite_extensions_dir(&self) -> Result<()> {
+    fn create_sqlite_extensions_dir(&self) -> Result<()> {
         std::fs::create_dir(&self.sqlite_extensions_path).with_context(|| {
             format!(
                 "Could not create new directory at {}",
@@ -111,22 +442,22 @@ impl ProjectDirectory {
         })?;
         Ok(())
     }
-    pub fn read_spm_toml(&self) -> Result<SpmToml> {
+    fn read_spm_toml(&self) -> Result<SpmToml> {
         let contents = self.read_spm_toml_contents()?;
         let spm_toml = toml::from_str(&contents)
             .with_context(|| format!("spm.toml at {} is not valid", "TODO"))?;
         Ok(spm_toml)
     }
-    pub fn read_spm_lock(&self) -> Result<SpmLock> {
+    fn read_spm_lock(&self) -> Result<SpmLock> {
         let contents = self.read_spm_lock_contents()?;
         let spm_toml = serde_json::from_str(&contents)
             .with_context(|| format!("spm.lock at {} is not valid", "TODO"))?;
         Ok(spm_toml)
     }
-    pub fn read_spm_toml_contents(&self) -> Result<String> {
+    fn read_spm_toml_contents(&self) -> Result<String> {
         Ok(std::fs::read_to_string(&self.spm_toml_path)?)
     }
-    pub fn read_spm_lock_contents(&self) -> Result<String> {
+    fn read_spm_lock_contents(&self) -> Result<String> {
         Ok(std::fs::read_to_string(&self.spm_lock_path)?)
     }
     pub fn write_spm_toml_contents<C: AsRef<[u8]>>(&self, contents: C) -> Result<()> {
@@ -268,7 +599,7 @@ mod tests {
         assert_eq!(t.description, "boingo");
         let x = t.extensions.get("github.com/asg017/sqlite-path").unwrap();
 
-        if let ExtensionDefinition::Version(v) = x {
+        if let SpmTomlExtensionDefinition::Version(v) = x {
             assert_eq!(v, "v0.2.0-alpha.1");
         } else {
             panic!();
