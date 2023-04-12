@@ -24,8 +24,7 @@ fn command() -> Command {
                 .arg(Arg::new("url").required(true))
                 .arg(Arg::new("artifacts").required(false)),
         )
-        .subcommand(Command::new("generate").about("gen"))
-        .subcommand(Command::new("install").about("Install a SQLite extension"))
+        .subcommand(Command::new("install").about("Install all listed SQLite extensions"))
         .subcommand(
             Command::new("run")
                 .about("Runs a command with pre-configured SQLite extenion path")
@@ -78,10 +77,6 @@ fn execute_matches(matches: ArgMatches) -> Result<()> {
 
             let project = Project::resolve_from_args(matches)?;
             project.command_add(url, artifacts)
-        }
-        Some(("generate", matches)) => {
-            let project = Project::resolve_from_args(matches)?;
-            project.command_generate()
         }
         Some(("install", matches)) => {
             let project = Project::resolve_from_args(matches)?;

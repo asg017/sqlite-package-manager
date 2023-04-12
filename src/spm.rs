@@ -94,7 +94,14 @@ impl GithubReleaseExtension {
                 std::env::consts::ARCH.to_owned(),
             ),
         };
-        for (_, e) in &self.spm_json.extensions {
+        for (name, e) in &self.spm_json.extensions {
+            // if the extension definition only declares a subset of artifacts, then only
+            // download those. ex `"xxx" = {artifacts=["a", "c"]}`, only download a and c, not b
+            if let Some(artifacts) = &self.artifacts {
+                if !artifacts.iter().any(|a| *a == *name) {
+                    continue;
+                }
+            }
             let platform = e
                 .platforms
                 .iter()
@@ -373,9 +380,10 @@ impl Project {
         Ok(())
     }
 
-    // TODO standardize os/arch
     pub fn command_install(&self) -> Result<()> {
-        self.install(None)
+        self.generate_lockfile()?;
+        self.install(None)?;
+        Ok(())
     }
     pub fn command_add(&self, url: &str, artifacts: Option<Vec<String>>) -> Result<()> {
         let pkg_resolver = determine_package_resolver(url)?;
@@ -416,9 +424,6 @@ impl Project {
             extensions,
         })?;
         Ok(())
-    }
-    pub fn command_generate(&self) -> Result<()> {
-        self.generate_lockfile()
     }
 
     fn sqlite_extensions_path(&self) -> std::path::PathBuf {

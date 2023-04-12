@@ -38,6 +38,96 @@
           }
         }
       }
+    },
+    "https://github.com/asg017/sqlite-path": {
+      "version": "v0.2.0-alpha.1",
+      "artifacts": null,
+      "resolved_url": "https://github.com/asg017/sqlite-path",
+      "resolved_spm_json": "https://github.com/asg017/sqlite-path/releases/download/v0.2.0-alpha.1/spm.json",
+      "integrity": "",
+      "spm_json": {
+        "version": 0,
+        "extensions": {
+          "path0": {
+            "description": "",
+            "platforms": [
+              {
+                "os": "linux",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-path-v0.2.0-alpha.1-linux-x86_64.tar.gz",
+                "asset_sha256": "040a5b89c2f70c176251414c6c517e0116958e4f810a8b579a86de00c74edbc2",
+                "asset_md5": "/tjynk9EhB/c6ATKjVU0wg=="
+              },
+              {
+                "os": "darwin",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-path-v0.2.0-alpha.1-darwin-x86_64.tar.gz",
+                "asset_sha256": "6257095ac5eead76da801d5832463b2f6352c15bd84f25374b77c951276d2b0d",
+                "asset_md5": "7MPeVuRypdEWJJb2qo2v1Q=="
+              },
+              {
+                "os": "windows",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-path-v0.2.0-alpha.1-windows-x86_64.tar.gz",
+                "asset_sha256": "ddefedeba9291fc62b6818d425d363142d392b0c568cd428f648c4acb87b65a6",
+                "asset_md5": "Tty30X/8OqRW4ElCheRQKg=="
+              }
+            ]
+          }
+        }
+      }
+    },
+    "github.com/asg017/sqlite-vss": {
+      "version": "v0.0.3",
+      "artifacts": [
+        "vector0"
+      ],
+      "resolved_url": "https://github.com/asg017/sqlite-vss",
+      "resolved_spm_json": "https://github.com/asg017/sqlite-vss/releases/download/v0.0.3/spm.json",
+      "integrity": "",
+      "spm_json": {
+        "version": 0,
+        "extensions": {
+          "vss0": {
+            "description": "",
+            "platforms": [
+              {
+                "os": "linux",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-vss-v0.0.3-vss0-linux-x86_64.tar.gz",
+                "asset_sha256": "85c5d22f4f09b3f4b01cabf4d2f2178284246466bc143b8ea7e8600a18738651",
+                "asset_md5": "7MwiacZOGuqBkKR8Uo31Zw=="
+              },
+              {
+                "os": "darwin",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-vss-v0.0.3-vss0-darwin-x86_64.tar.gz",
+                "asset_sha256": "417d0d5716cb0ba6f45d592ed6f1f1eb835d1950e9ce09abdb2cb6918648c9b7",
+                "asset_md5": "AcTXFEilJK68C95VWmHYdQ=="
+              }
+            ]
+          },
+          "vector0": {
+            "description": "",
+            "platforms": [
+              {
+                "os": "linux",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-vss-v0.0.3-vector0-linux-x86_64.tar.gz",
+                "asset_sha256": "81e86dab22a3e9cea1f59f0661d25061e1ad79ff77b69bc795481ea0e874551b",
+                "asset_md5": "1x9yTcQ7wzdfRZd2VT9kgA=="
+              },
+              {
+                "os": "darwin",
+                "cpu": "x86_64",
+                "asset_name": "sqlite-vss-v0.0.3-vector0-darwin-x86_64.tar.gz",
+                "asset_sha256": "706e87de380bcfe34c75b586b08e21719e1a4898be30287f9573718f472b09f8",
+                "asset_md5": "C8ktVtnHfQ4eU5311rcg6g=="
+              }
+            ]
+          }
+        }
+      }
     }
   }
 }
