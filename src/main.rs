@@ -1,3 +1,4 @@
+mod http;
 mod spm;
 
 use crate::spm::Project;
@@ -17,14 +18,37 @@ fn command() -> Command {
                 .help("Run spm commands in a different directory")
                 .global(true),
         )
-        .subcommand(Command::new("init").about("Initialize a spm project"))
+        .subcommand(
+            Command::new("init")
+                // https://docs.npmjs.com/cli/v8/commands/npm-init#synopsis
+                .aliases(["create", "innit"])
+                .about("Initialize a spm project"),
+        )
         .subcommand(
             Command::new("add")
                 .about("Add a SQLite extension to your spm project.")
                 .arg(Arg::new("url").required(true))
                 .arg(Arg::new("artifacts").required(false)),
         )
-        .subcommand(Command::new("install").about("Install all listed SQLite extensions"))
+        .subcommand(
+            Command::new("install")
+                .aliases(
+                    // https://docs.npmjs.com/cli/v8/commands/npm-install#synopsis
+                    [
+                        "i", "in", "ins", "inst", "insta", "instal", "isnt", "isnta", "isntal",
+                        "isntall",
+                    ],
+                )
+                .about("Install all listed SQLite extensions"),
+        )
+        .subcommand(
+            Command::new("ci")
+                .aliases(
+                    // https://docs.npmjs.com/cli/v8/commands/npm-ci#synopsis
+                    ["clean-install", "ic", "install-clean", "isntall-clean"],
+                )
+                .about("Install all listed SQLite extensions"),
+        )
         .subcommand(
             Command::new("run")
                 .about("Runs a command with pre-configured SQLite extenion path")
@@ -48,6 +72,25 @@ fn execute_matches(matches: ArgMatches) -> Result<()> {
             let project = Project::resolve_from_args(matches)?;
             project.command_init()
         }
+        Some(("add", matches)) => {
+            let url = matches
+                .get_one::<String>("url")
+                .context("url is a required argument")?;
+            let artifacts: Option<Vec<String>> = matches
+                .get_many::<String>("artifacts")
+                .map(|v| v.into_iter().map(|v| v.to_string()).collect());
+
+            let project = Project::resolve_from_args(matches)?;
+            project.command_add(url, artifacts)
+        }
+        Some(("install", matches)) => {
+            let project = Project::resolve_from_args(matches)?;
+            project.command_install()
+        }
+        Some(("ci", matches)) => {
+            let project = Project::resolve_from_args(matches)?;
+            project.command_clean_install()
+        }
         Some(("activate", matches)) => {
             let project = Project::resolve_from_args(matches)?;
             project.command_activate()
@@ -66,21 +109,6 @@ fn execute_matches(matches: ArgMatches) -> Result<()> {
                 .split_first()
                 .ok_or_else(|| anyhow!("at least one argument is required"))?;
             project.command_run(program, arguments)
-        }
-        Some(("add", matches)) => {
-            let url = matches
-                .get_one::<String>("url")
-                .context("url is a required argument")?;
-            let artifacts: Option<Vec<String>> = matches
-                .get_many::<String>("artifacts")
-                .map(|v| v.into_iter().map(|v| v.to_string()).collect());
-
-            let project = Project::resolve_from_args(matches)?;
-            project.command_add(url, artifacts)
-        }
-        Some(("install", matches)) => {
-            let project = Project::resolve_from_args(matches)?;
-            project.command_install()
         }
         _ => Err(anyhow!("unknown subcommand")),
     }

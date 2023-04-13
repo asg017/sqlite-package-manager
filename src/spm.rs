@@ -1,11 +1,13 @@
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::{collections::HashMap, ffi::OsString, process::Stdio, str::Split};
 
 use anyhow::{anyhow, Context, Result};
 use flate2::read::GzDecoder;
 use std::io::BufReader;
 use tar::Archive;
+use toml_edit::{value, Array, Document, InlineTable, Item};
 use url::Url;
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,7 +118,7 @@ impl GithubReleaseExtension {
                 self.resolved_url, self.version
             );
             println!("downloading {url} ...");
-            let asset = ureq::get(url.as_str())
+            let asset = crate::http::http_get(url.as_str())
                 .call()
                 .with_context(|| format!("Error making request to {url}"))?
                 .into_reader();
@@ -143,8 +145,6 @@ impl GithubReleaseExtension {
         Ok(())
     }
 }
-
-use std::path::PathBuf;
 
 fn github_parse_path(mut parts: Split<char>) -> Result<GithubRelease> {
     let owner = parts
@@ -222,7 +222,7 @@ impl PackageResolver for GithubRelease {
             "https://api.github.com/repos/{}/{}/releases/latest",
             self.owner, self.repo
         );
-        let response: serde_json::Value = ureq::get(url.as_str())
+        let response: serde_json::Value = crate::http::http_get(url.as_str())
             .call()
             .with_context(|| format!("call to {url} failed"))?
             .into_json()
@@ -251,7 +251,7 @@ impl PackageResolver for GithubRelease {
         let integrity = "".to_owned();
 
         let url = resolved_spm_json.as_str();
-        let spm_json: SpmPackageJson = ureq::get(url)
+        let spm_json: SpmPackageJson = crate::http::http_get(url)
             .call()
             .with_context(|| format!("Could not fetch spm.json file at {url}"))?
             .into_json()
@@ -277,12 +277,11 @@ fn spm_os_name(os: &str) -> &str {
 }
 
 pub(crate) struct Project {
+    base_project_directory: PathBuf,
     spm_toml_path: PathBuf,
     spm_lock_path: PathBuf,
     sqlite_extensions_path: PathBuf,
 }
-
-use toml_edit::{value, Array, Document, Item, Table};
 
 #[cfg(target_os = "linux")]
 const LIBRARY_PATH_ENV_VAR: &str = "LD_LIBRARY_PATH";
@@ -292,11 +291,12 @@ const LIBRARY_PATH_ENV_VAR: &str = "DYLD_LIBRARY_PATH";
 const LIBRARY_PATH_ENV_VAR: &str = "PATH";
 
 impl Project {
-    pub fn new(base_directory: PathBuf) -> Project {
-        let spm_toml_path = base_directory.join("spm.toml");
-        let spm_lock_path = base_directory.join("spm.lock");
-        let sqlite_extensions_path = base_directory.join("sqlite_extensions");
+    pub fn new(base_project_directory: PathBuf) -> Project {
+        let spm_toml_path = base_project_directory.join("spm.toml");
+        let spm_lock_path = base_project_directory.join("spm.lock");
+        let sqlite_extensions_path = base_project_directory.join("sqlite_extensions");
         Project {
+            base_project_directory,
             spm_toml_path,
             spm_lock_path,
             sqlite_extensions_path,
@@ -309,66 +309,7 @@ impl Project {
             None => Ok(Project::new(std::env::current_dir()?)),
         }
     }
-    /// returns a colon-seperated string of directory to "preload" libraries from.
-    /// Meant to overwrite LIBRARY_PATH_ENV_VAR (LD_LIBRARY_PATH, DYLD_LIBRARY_PATH, etc.)
-    fn resolve_library_path(&self) -> Result<OsString> {
-        match std::env::var_os(LIBRARY_PATH_ENV_VAR) {
-            Some(paths) => {
-                let mut paths = std::env::split_paths(&paths).collect::<Vec<_>>();
-                paths.push(self.sqlite_extensions_path());
-                Ok(std::env::join_paths(paths)
-                    .context("Invalid path, is there a semicolor ':' somewhere in a path?")?)
-            }
-            None => Ok(self.sqlite_extensions_path().into()),
-        }
-    }
-
-    fn install(&self, platform: Platform) -> Result<()> {
-        if !self.spm_toml_exists() {
-            println!("No spm.toml found in current directory, exiting.");
-            std::process::exit(1);
-        }
-
-        if !self.sqlite_extensions_exists() {
-            self.create_sqlite_extensions_dir()?;
-        }
-
-        let spm_lock: SpmLock = self.read_spm_lock()?;
-        for (name, extension) in spm_lock.extensions {
-            match extension {
-                SpmLockExtension::GithubRelease(extension) => {
-                    extension.download_platform(platform.clone(), self)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn command_activate(&self) -> Result<()> {
-        let library_path = self.resolve_library_path()?;
-        println!(
-            "export {}={}",
-            LIBRARY_PATH_ENV_VAR,
-            library_path.to_string_lossy()
-        );
-        Ok(())
-    }
-    pub fn command_deactivate(&self) -> Result<()> {
-        // TODO
-        println!("unset {}", LIBRARY_PATH_ENV_VAR);
-        Ok(())
-    }
-    pub fn command_run(&self, program: &str, arguments: &[&String]) -> Result<()> {
-        let mut cmd = std::process::Command::new(program)
-            .args(arguments)
-            .env(LIBRARY_PATH_ENV_VAR, self.resolve_library_path()?)
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn()?;
-
-        let status = cmd.wait()?;
-        std::process::exit(status.code().map_or(1, |code| code));
-    }
+    /// Implements `spm init`
     pub fn command_init(&self) -> Result<()> {
         if !self.spm_toml_exists() {
             self.write_spm_toml_contents("\n[extensions]")?;
@@ -380,11 +321,7 @@ impl Project {
         Ok(())
     }
 
-    pub fn command_install(&self) -> Result<()> {
-        self.generate_lockfile()?;
-        self.install(None)?;
-        Ok(())
-    }
+    /// Implements `spm add`
     pub fn command_add(&self, url: &str, artifacts: Option<Vec<String>>) -> Result<()> {
         let pkg_resolver = determine_package_resolver(url)?;
         let version = pkg_resolver.version_from_reference()?;
@@ -393,13 +330,15 @@ impl Project {
         let mut doc = spm_toml_contents
             .parse::<Document>()
             .context("invalid spm.toml")?;
-
         doc["extensions"][pkg_resolver.toml_name().as_str()] = match artifacts {
             Some(artifacts) => {
-                let mut t = Table::new();
-                t["version"] = value(version);
-                t["artifacts"] = value(Array::from_iter(artifacts));
-                Item::Table(t)
+                let mut t = InlineTable::new();
+                t.insert("version", version.into());
+                t.insert(
+                    "artifacts",
+                    toml_edit::Value::Array(Array::from_iter(artifacts)),
+                );
+                Item::Value(toml_edit::Value::InlineTable(t))
             }
             None => value(version),
         };
@@ -411,6 +350,113 @@ impl Project {
         Ok(())
     }
 
+    /// Implements `spm install`
+    pub fn command_install(&self) -> Result<()> {
+        self.generate_lockfile()?;
+        self.install(None)?;
+        Ok(())
+    }
+
+    /// Implements `spm ci`
+    // TODO verify that spm.toml and spm.lock are consistent, and exit if not
+    pub fn command_clean_install(&self) -> Result<()> {
+        self.install(None)?;
+        Ok(())
+    }
+
+    /// Implements `spm activate`
+    pub fn command_activate(&self) -> Result<()> {
+        let library_path = self.resolve_library_path()?;
+        println!(
+            "export {}={}",
+            LIBRARY_PATH_ENV_VAR,
+            shell_escape::escape(library_path.to_string_lossy())
+        );
+        Ok(())
+    }
+    /// Implements `spm deactivate`
+    pub fn command_deactivate(&self) -> Result<()> {
+        // TODO
+        println!("unset {}", LIBRARY_PATH_ENV_VAR);
+        Ok(())
+    }
+    /// Implements `spm run`
+    pub fn command_run(&self, program: &str, arguments: &[&String]) -> Result<()> {
+        let mut cmd = std::process::Command::new(program)
+            .args(arguments)
+            .env(LIBRARY_PATH_ENV_VAR, self.resolve_library_path()?)
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+
+        let status = cmd.wait()?;
+        std::process::exit(status.code().map_or(1, |code| code));
+    }
+
+    /// returns a colon-seperated string of directory to "preload" libraries from.
+    /// Meant to overwrite LIBRARY_PATH_ENV_VAR (LD_LIBRARY_PATH, DYLD_LIBRARY_PATH, etc.)
+    fn resolve_library_path(&self) -> Result<OsString> {
+        let spm_toml = self.read_spm_toml()?;
+
+        let mut preloads = match spm_toml.preload_directories {
+            Some(preload_directories) => preload_directories
+                .iter()
+                .map(|path| {
+                    let path = std::path::Path::new(path);
+                    if path.is_absolute() {
+                        Ok(path.to_path_buf())
+                    } else {
+                        let absolute = self.base_project_directory.clone().join(path);
+                        Ok(std::fs::canonicalize(&absolute).with_context(|| {
+                            format!(
+                                "Could not find the preload directory: {}",
+                                &absolute.display()
+                            )
+                        })?)
+                    }
+                })
+                .collect::<Result<Vec<PathBuf>>>()?,
+            None => vec![],
+        };
+        let preloads = match std::env::var_os(LIBRARY_PATH_ENV_VAR) {
+            Some(paths) => {
+                let mut paths = std::env::split_paths(&paths).collect::<Vec<_>>();
+                paths.append(&mut preloads);
+                paths.push(self.sqlite_extensions_path());
+                paths
+            }
+            None => {
+                preloads.push(self.sqlite_extensions_path());
+                preloads
+            }
+        };
+        std::env::join_paths(preloads)
+            .context("Invalid path, is there a semicolor ':' somewhere in a path?")
+    }
+
+    // TODO skip extensions that are already downloaded
+    fn install(&self, platform: Platform) -> Result<()> {
+        if !self.spm_toml_exists() {
+            println!("No spm.toml found in current directory, exiting.");
+            std::process::exit(1);
+        }
+
+        if !self.sqlite_extensions_exists() {
+            self.create_sqlite_extensions_dir()?;
+        }
+
+        let spm_lock: SpmLock = self.read_spm_lock()?;
+        for extension in spm_lock.extensions.values() {
+            match extension {
+                SpmLockExtension::GithubRelease(extension) => {
+                    extension.download_platform(platform.clone(), self)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // don't regenerate lockfile from scratch every time
     fn generate_lockfile(&self) -> Result<()> {
         let spm_toml = self.read_spm_toml()?;
         let mut extensions = HashMap::new();
@@ -426,18 +472,27 @@ impl Project {
         Ok(())
     }
 
+    // full path of $BASE/sqlite_extensions/
     fn sqlite_extensions_path(&self) -> std::path::PathBuf {
         self.sqlite_extensions_path.clone()
     }
+
+    /// does spm.toml for this project exist?
     fn spm_toml_exists(&self) -> bool {
         std::path::Path::exists(&self.spm_toml_path)
     }
+
+    /// does spm.lock for this project exist?
     fn _spm_lock_exists(&self) -> bool {
         std::path::Path::exists(&self.spm_lock_path)
     }
+
+    /// does sqlite_extensions/ for this project exist?
     fn sqlite_extensions_exists(&self) -> bool {
         std::path::Path::exists(&self.sqlite_extensions_path)
     }
+
+    /// creates the sqlite_extensions/ directory
     fn create_sqlite_extensions_dir(&self) -> Result<()> {
         std::fs::create_dir(&self.sqlite_extensions_path).with_context(|| {
             format!(
@@ -447,33 +502,47 @@ impl Project {
         })?;
         Ok(())
     }
+
+    /// read contents of the spm.toml file as SpmToml
     fn read_spm_toml(&self) -> Result<SpmToml> {
         let contents = self.read_spm_toml_contents()?;
         let spm_toml = toml::from_str(&contents)
             .with_context(|| format!("spm.toml at {} is not valid", "TODO"))?;
         Ok(spm_toml)
     }
+
+    /// read contents of the spm.lock file as SpmLock
     fn read_spm_lock(&self) -> Result<SpmLock> {
         let contents = self.read_spm_lock_contents()?;
         let spm_toml = serde_json::from_str(&contents)
             .with_context(|| format!("spm.lock at {} is not valid", "TODO"))?;
         Ok(spm_toml)
     }
+
+    /// read contents of the spm.toml file as a String
     fn read_spm_toml_contents(&self) -> Result<String> {
         Ok(std::fs::read_to_string(&self.spm_toml_path)?)
     }
+
+    /// read contents of the spm.lock file as a String
     fn read_spm_lock_contents(&self) -> Result<String> {
         Ok(std::fs::read_to_string(&self.spm_lock_path)?)
     }
+
+    /// write to the spm.toml with the provided contents
     pub fn write_spm_toml_contents<C: AsRef<[u8]>>(&self, contents: C) -> Result<()> {
         std::fs::write(&self.spm_toml_path, contents)
             .with_context(|| format!("could not write to {}", &self.spm_toml_path.display()))
     }
+
+    /// write to the spm.lock with the provided contents
     pub fn write_spm_lock(&self, lock: SpmLock) -> Result<()> {
         let contents = serde_json::to_vec_pretty(&lock).context("Failed to serialize spm.lock")?;
         std::fs::write(&self.spm_lock_path, contents)
             .with_context(|| format!("could not write to {}", &self.spm_lock_path.display()))
     }
+
+    /// write a single file into the sqlite_extensions/ directory with the given contents
     pub fn write_in_sqlite_extensions<C: AsRef<[u8]>>(
         &self,
         path: std::path::PathBuf,
