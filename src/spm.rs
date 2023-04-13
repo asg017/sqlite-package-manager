@@ -10,272 +10,6 @@ use tar::Archive;
 use toml_edit::{value, Array, Document, InlineTable, Item};
 use url::Url;
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// spm.json
-pub struct SpmPackageJson {
-    pub version: i64,
-    pub extensions: HashMap<String, SpmPackageJsonExtension>,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// descibes a single extension in spm.json, under .extensions
-pub struct SpmPackageJsonExtension {
-    pub description: String,
-    pub platforms: Vec<SpmPackageJsonPlatform>,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpmPackageJsonPlatform {
-    pub os: String,
-    pub cpu: String,
-    #[serde(rename = "asset_name")]
-    pub asset_name: String,
-    #[serde(rename = "asset_sha256")]
-    pub asset_sha256: String,
-    #[serde(rename = "asset_md5")]
-    pub asset_md5: String,
-}
-
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// spm.toml
-pub struct SpmToml {
-    pub description: String,
-    pub preload_directories: Option<Vec<String>>,
-    pub extensions: HashMap<String, SpmTomlExtensionDefinition>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-/// definition of an extension in spm.toml, either a version string or object
-pub enum SpmTomlExtensionDefinition {
-    // project = "v1.2.3"
-    Version(String),
-    // project = { version="v1.2.3", artifacts=["abc0", "xyz0"] }
-    Definition {
-        version: String,
-        artifacts: Vec<String>,
-    },
-}
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// spm.lock, serialized as JSON
-pub struct SpmLock {
-    pub version: i32,
-    pub extensions: HashMap<String, SpmLockExtension>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum SpmLockExtension {
-    GithubRelease(GithubReleaseExtension),
-}
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GithubReleaseExtension {
-    pub version: String,
-    pub artifacts: Option<Vec<String>>,
-    #[serde(rename = "resolved_url")]
-    pub resolved_url: String,
-    #[serde(rename = "resolved_spm_json")]
-    pub resolved_spm_json: String,
-    pub integrity: String,
-    #[serde(rename = "spm_json")]
-    pub spm_json: SpmPackageJson,
-}
-type Platform = Option<(String, String)>;
-impl GithubReleaseExtension {
-    pub(crate) fn download_platform(&self, platform: Platform, project: &Project) -> Result<()> {
-        let (os, arch) = match platform {
-            Some((os, arch)) => (os, arch),
-            None => (
-                spm_os_name(std::env::consts::OS).to_owned(),
-                std::env::consts::ARCH.to_owned(),
-            ),
-        };
-        for (name, e) in &self.spm_json.extensions {
-            // if the extension definition only declares a subset of artifacts, then only
-            // download those. ex `"xxx" = {artifacts=["a", "c"]}`, only download a and c, not b
-            if let Some(artifacts) = &self.artifacts {
-                if !artifacts.iter().any(|a| *a == *name) {
-                    continue;
-                }
-            }
-            let platform = e
-                .platforms
-                .iter()
-                .find(|platform| platform.os == os && platform.cpu == arch);
-            let platform = platform.ok_or_else(|| {
-                anyhow!("No matching platform found for the current device ({os}-{arch})")
-            })?;
-
-            let asset_name = &platform.asset_name;
-            let url = format!(
-                "{}/releases/download/{}/{asset_name}",
-                self.resolved_url, self.version
-            );
-            println!("downloading {url} ...");
-            let asset = crate::http::http_get(url.as_str())
-                .call()
-                .with_context(|| format!("Error making request to {url}"))?
-                .into_reader();
-            let buf_reader = BufReader::new(asset);
-            let gz_decoder = GzDecoder::new(buf_reader);
-            let mut archive = Archive::new(gz_decoder);
-
-            // Extract the file
-            let entry = archive
-                .entries()
-                .with_context(|| format!("Error finding entries in {asset_name}"))?
-                .filter_map(|entry| entry.ok())
-                .next();
-            entry
-                .with_context(|| format!("could not unpack tar.gz entry for {}", asset_name))?
-                .unpack_in(&project.sqlite_extensions_path())
-                .with_context(|| {
-                    format!(
-                        "could not unpack tar.gz entry into {}",
-                        project.sqlite_extensions_path().display()
-                    )
-                })?;
-        }
-        Ok(())
-    }
-}
-
-fn github_parse_path(mut parts: Split<char>) -> Result<GithubRelease> {
-    let owner = parts
-        .next()
-        .ok_or_else(|| anyhow!("github owner name required"))?
-        .to_owned();
-    let repo = parts
-        .next()
-        .ok_or_else(|| anyhow!("github repo name required"))?
-        .to_owned();
-    if let Some((repo, version)) = repo.split_once('@') {
-        Ok(GithubRelease {
-            owner,
-            repo: repo.to_owned(),
-            version: Some(version.to_owned()),
-        })
-    } else {
-        Ok(GithubRelease {
-            owner,
-            repo: repo.to_owned(),
-            version: None,
-        })
-    }
-}
-
-// https://github.com/owner/repo -> GithubReleaseResolver
-// github.com/owner/repo -> GithubReleaseResolver
-// gh:owner/repo -> GithubReleaseResolver
-fn determine_package_resolver(name: &str) -> Result<Box<dyn PackageResolver>> {
-    if let Ok(url) = Url::parse(name) {
-        return match url.host_str() {
-            Some("github.com") => {
-                let path_segments = url.path_segments().ok_or_else(|| anyhow!("wut"))?;
-                Ok(Box::new(github_parse_path(path_segments)?))
-            }
-            Some(_) => Err(anyhow!("todo")),
-            None => Err(anyhow!("todo")),
-        };
-    }
-    if let Some(reference) = name.strip_prefix("gh:") {
-        let parts = reference.split('/');
-        return Ok(Box::new(github_parse_path(parts)?));
-    }
-    if let Some(reference) = name.strip_prefix("github.com/") {
-        let parts = reference.split('/');
-        return Ok(Box::new(github_parse_path(parts)?));
-    }
-    Err(anyhow!("todo"))
-}
-pub trait PackageResolver {
-    fn version_from_reference(&self) -> Result<String>;
-    fn toml_name(&self) -> String;
-    fn latest_version(&self) -> Result<String>;
-    fn generate_lock(&self, definition: &SpmTomlExtensionDefinition) -> Result<SpmLockExtension>;
-}
-
-struct GithubRelease {
-    owner: String,
-    repo: String,
-    version: Option<String>,
-}
-
-impl PackageResolver for GithubRelease {
-    fn version_from_reference(&self) -> Result<String> {
-        match &self.version {
-            Some(v) => Ok(v.to_owned()),
-            None => self.latest_version(),
-        }
-    }
-    fn toml_name(&self) -> String {
-        format!("https://github.com/{}/{}", self.owner, self.repo)
-    }
-    fn latest_version(&self) -> Result<String> {
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/releases/latest",
-            self.owner, self.repo
-        );
-        let response: serde_json::Value = crate::http::http_get(url.as_str())
-            .call()
-            .with_context(|| format!("call to {url} failed"))?
-            .into_json()
-            .with_context(|| format!("request did not return proper JSON: {url}"))?;
-
-        Ok(response
-            .get("tag_name")
-            .context("Expected 'tag_name' in JSON response")?
-            .as_str()
-            .context("Expected 'tag_name' value to be a string")?
-            .to_owned())
-    }
-    fn generate_lock(&self, definition: &SpmTomlExtensionDefinition) -> Result<SpmLockExtension> {
-        let (version, artifacts) = match definition {
-            SpmTomlExtensionDefinition::Version(version) => (version.clone(), None),
-            SpmTomlExtensionDefinition::Definition { version, artifacts } => {
-                (version.clone(), Some(artifacts.clone()))
-            }
-        };
-        let resolved_url = format!("https://github.com/{}/{}", self.owner, self.repo);
-        let resolved_spm_json = format!(
-            "https://github.com/{}/{}/releases/download/{version}/spm.json",
-            self.owner, self.repo
-        );
-
-        let integrity = "".to_owned();
-
-        let url = resolved_spm_json.as_str();
-        let spm_json: SpmPackageJson = crate::http::http_get(url)
-            .call()
-            .with_context(|| format!("Could not fetch spm.json file at {url}"))?
-            .into_json()
-            .with_context(|| format!("Could not decode fetched spm.json into JSON, from {url}"))?;
-
-        Ok(SpmLockExtension::GithubRelease(GithubReleaseExtension {
-            version,
-            artifacts,
-            resolved_url,
-            resolved_spm_json,
-            integrity,
-            spm_json,
-        }))
-    }
-}
-
-fn spm_os_name(os: &str) -> &str {
-    if os == "macos" {
-        "darwin"
-    } else {
-        os
-    }
-}
-
 pub(crate) struct Project {
     base_project_directory: PathBuf,
     spm_toml_path: PathBuf,
@@ -551,6 +285,273 @@ impl Project {
         let full_path = self.sqlite_extensions_path.join(path);
         std::fs::write(&full_path, contents)
             .with_context(|| format!("could not write to {}", full_path.display()))
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+/// spm.toml
+pub struct SpmToml {
+    pub description: String,
+    pub preload_directories: Option<Vec<String>>,
+    pub extensions: HashMap<String, SpmTomlExtensionDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+/// definition of an extension in spm.toml, either a version string or object
+pub enum SpmTomlExtensionDefinition {
+    // project = "v1.2.3"
+    Version(String),
+    // project = { version="v1.2.3", artifacts=["abc0", "xyz0"] }
+    Definition {
+        version: String,
+        artifacts: Vec<String>,
+    },
+}
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+/// spm.lock, serialized as JSON
+pub struct SpmLock {
+    pub version: i32,
+    pub extensions: HashMap<String, SpmLockExtension>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SpmLockExtension {
+    GithubRelease(GithubReleaseExtension),
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+/// spm.json
+pub struct SpmPackageJson {
+    pub version: i64,
+    pub extensions: HashMap<String, SpmPackageJsonExtension>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+/// descibes a single extension in spm.json, under .extensions
+pub struct SpmPackageJsonExtension {
+    pub description: String,
+    pub platforms: Vec<SpmPackageJsonPlatform>,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpmPackageJsonPlatform {
+    pub os: String,
+    pub cpu: String,
+    #[serde(rename = "asset_name")]
+    pub asset_name: String,
+    #[serde(rename = "asset_sha256")]
+    pub asset_sha256: String,
+    #[serde(rename = "asset_md5")]
+    pub asset_md5: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubReleaseExtension {
+    pub version: String,
+    pub artifacts: Option<Vec<String>>,
+    #[serde(rename = "resolved_url")]
+    pub resolved_url: String,
+    #[serde(rename = "resolved_spm_json")]
+    pub resolved_spm_json: String,
+    pub integrity: String,
+    #[serde(rename = "spm_json")]
+    pub spm_json: SpmPackageJson,
+}
+type Platform = Option<(String, String)>;
+impl GithubReleaseExtension {
+    pub(crate) fn download_platform(&self, platform: Platform, project: &Project) -> Result<()> {
+        let (os, arch) = match platform {
+            Some((os, arch)) => (os, arch),
+            None => (
+                spm_os_name(std::env::consts::OS).to_owned(),
+                std::env::consts::ARCH.to_owned(),
+            ),
+        };
+        for (name, e) in &self.spm_json.extensions {
+            // if the extension definition only declares a subset of artifacts, then only
+            // download those. ex `"xxx" = {artifacts=["a", "c"]}`, only download a and c, not b
+            if let Some(artifacts) = &self.artifacts {
+                if !artifacts.iter().any(|a| *a == *name) {
+                    continue;
+                }
+            }
+            let platform = e
+                .platforms
+                .iter()
+                .find(|platform| platform.os == os && platform.cpu == arch);
+            let platform = platform.ok_or_else(|| {
+                anyhow!("No matching platform found for the current device ({os}-{arch})")
+            })?;
+
+            let asset_name = &platform.asset_name;
+            let url = format!(
+                "{}/releases/download/{}/{asset_name}",
+                self.resolved_url, self.version
+            );
+            println!("downloading {url} ...");
+            let asset = crate::http::http_get(url.as_str())
+                .call()
+                .with_context(|| format!("Error making request to {url}"))?
+                .into_reader();
+            let buf_reader = BufReader::new(asset);
+            let gz_decoder = GzDecoder::new(buf_reader);
+            let mut archive = Archive::new(gz_decoder);
+
+            // Extract the file
+            let entry = archive
+                .entries()
+                .with_context(|| format!("Error finding entries in {asset_name}"))?
+                .filter_map(|entry| entry.ok())
+                .next();
+            entry
+                .with_context(|| format!("could not unpack tar.gz entry for {}", asset_name))?
+                .unpack_in(&project.sqlite_extensions_path())
+                .with_context(|| {
+                    format!(
+                        "could not unpack tar.gz entry into {}",
+                        project.sqlite_extensions_path().display()
+                    )
+                })?;
+        }
+        Ok(())
+    }
+}
+
+fn github_parse_path(mut parts: Split<char>) -> Result<GithubRelease> {
+    let owner = parts
+        .next()
+        .ok_or_else(|| anyhow!("github owner name required"))?
+        .to_owned();
+    let repo = parts
+        .next()
+        .ok_or_else(|| anyhow!("github repo name required"))?
+        .to_owned();
+    if let Some((repo, version)) = repo.split_once('@') {
+        Ok(GithubRelease {
+            owner,
+            repo: repo.to_owned(),
+            version: Some(version.to_owned()),
+        })
+    } else {
+        Ok(GithubRelease {
+            owner,
+            repo: repo.to_owned(),
+            version: None,
+        })
+    }
+}
+
+// https://github.com/owner/repo -> GithubReleaseResolver
+// github.com/owner/repo -> GithubReleaseResolver
+// gh:owner/repo -> GithubReleaseResolver
+fn determine_package_resolver(name: &str) -> Result<Box<dyn PackageResolver>> {
+    if let Ok(url) = Url::parse(name) {
+        return match url.host_str() {
+            Some("github.com") => {
+                let path_segments = url.path_segments().ok_or_else(|| anyhow!("wut"))?;
+                Ok(Box::new(github_parse_path(path_segments)?))
+            }
+            Some(_) => Err(anyhow!("todo")),
+            None => Err(anyhow!("todo")),
+        };
+    }
+    if let Some(reference) = name.strip_prefix("gh:") {
+        let parts = reference.split('/');
+        return Ok(Box::new(github_parse_path(parts)?));
+    }
+    if let Some(reference) = name.strip_prefix("github.com/") {
+        let parts = reference.split('/');
+        return Ok(Box::new(github_parse_path(parts)?));
+    }
+    Err(anyhow!("todo"))
+}
+pub trait PackageResolver {
+    fn version_from_reference(&self) -> Result<String>;
+    fn toml_name(&self) -> String;
+    fn latest_version(&self) -> Result<String>;
+    fn generate_lock(&self, definition: &SpmTomlExtensionDefinition) -> Result<SpmLockExtension>;
+}
+
+struct GithubRelease {
+    owner: String,
+    repo: String,
+    version: Option<String>,
+}
+
+impl PackageResolver for GithubRelease {
+    fn version_from_reference(&self) -> Result<String> {
+        match &self.version {
+            Some(v) => Ok(v.to_owned()),
+            None => self.latest_version(),
+        }
+    }
+    fn toml_name(&self) -> String {
+        format!("https://github.com/{}/{}", self.owner, self.repo)
+    }
+    fn latest_version(&self) -> Result<String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases/latest",
+            self.owner, self.repo
+        );
+        let response: serde_json::Value = crate::http::http_get(url.as_str())
+            .call()
+            .with_context(|| format!("call to {url} failed"))?
+            .into_json()
+            .with_context(|| format!("request did not return proper JSON: {url}"))?;
+
+        Ok(response
+            .get("tag_name")
+            .context("Expected 'tag_name' in JSON response")?
+            .as_str()
+            .context("Expected 'tag_name' value to be a string")?
+            .to_owned())
+    }
+    fn generate_lock(&self, definition: &SpmTomlExtensionDefinition) -> Result<SpmLockExtension> {
+        let (version, artifacts) = match definition {
+            SpmTomlExtensionDefinition::Version(version) => (version.clone(), None),
+            SpmTomlExtensionDefinition::Definition { version, artifacts } => {
+                (version.clone(), Some(artifacts.clone()))
+            }
+        };
+        let resolved_url = format!("https://github.com/{}/{}", self.owner, self.repo);
+        let resolved_spm_json = format!(
+            "https://github.com/{}/{}/releases/download/{version}/spm.json",
+            self.owner, self.repo
+        );
+
+        let integrity = "".to_owned();
+
+        let url = resolved_spm_json.as_str();
+        let spm_json: SpmPackageJson = crate::http::http_get(url)
+            .call()
+            .with_context(|| format!("Could not fetch spm.json file at {url}"))?
+            .into_json()
+            .with_context(|| format!("Could not decode fetched spm.json into JSON, from {url}"))?;
+
+        Ok(SpmLockExtension::GithubRelease(GithubReleaseExtension {
+            version,
+            artifacts,
+            resolved_url,
+            resolved_spm_json,
+            integrity,
+            spm_json,
+        }))
+    }
+}
+
+fn spm_os_name(os: &str) -> &str {
+    if os == "macos" {
+        "darwin"
+    } else {
+        os
     }
 }
 
