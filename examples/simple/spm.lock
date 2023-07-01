@@ -1,0 +1,47 @@
+{
+  "version": 0,
+  "extensions": {
+    "https://github.com/asg017/sqlite-xsv": {
+      "version": "v0.2.1-alpha.9",
+      "artifacts": null,
+      "resolved_url": "https://github.com/asg017/sqlite-xsv",
+      "resolved_spm_json": "https://github.com/asg017/sqlite-xsv/releases/download/v0.2.1-alpha.9/spm.json",
+      "integrity": "",
+      "spm_json": {
+        "version": 0,
+        "description": "",
+        "loadable": [
+          {
+            "os": "linux",
+            "cpu": "x86_64",
+            "asset_name": "sqlite-xsv-v0.2.1-alpha.9-loadable-linux-x86_64.tar.gz",
+            "asset_sha256": "2114212aacb820b17c6bd1ff781f43c61b49b741a7f421b3fb7807689fa213f8",
+            "asset_md5": "5F8FuBXUyzIFV4JMBwcxOg=="
+          },
+          {
+            "os": "macos",
+            "cpu": "x86_64",
+            "asset_name": "sqlite-xsv-v0.2.1-alpha.9-loadable-macos-x86_64.tar.gz",
+            "asset_sha256": "63e723b0cc2859c9e6925f11886704da18b8ab1c040a2fbc2d2cb88f580c7823",
+            "asset_md5": "4WvrxrF5Sjs/jbJhczfkBA=="
+          },
+          {
+            "os": "macos",
+            "cpu": "aarch64",
+            "asset_name": "sqlite-xsv-v0.2.1-alpha.9-loadable-macos-aarch64.tar.gz",
+            "asset_sha256": "28c46e9a6b34451f99ccb78610605b1f768c515ac3d995e56e097156cc4b17b1",
+            "asset_md5": "q2LFSFo9/2lzyc7zDPtvpA=="
+          },
+          {
+            "os": "windows",
+            "cpu": "x86_64",
+            "asset_name": "sqlite-xsv-v0.2.1-alpha.9-loadable-windows-x86_64.zip",
+            "asset_sha256": "153c0522898df671db8f40cd6e5b82097d3e35da6a0a51f5a0c108e7a602435a",
+            "asset_md5": "HNYKC9gBSsuogqjYXQRYLA=="
+          }
+        ],
+        "static": null
+      }
+    }
+  }
+}

@@ -1,11 +1,13 @@
 description = "boingo"
 
 [extensions]
-"https://github.com/asg017/sqlite-http" = "v0.1.0-alpha.2"
-"https://github.com/asg017/sqlite-vss" = { version = "v0.0.3", artifacts = ["vector0"] }
+#"https://github.com/asg017/sqlite-http" = "v0.1.0-alpha.2"
+#"https://github.com/asg017/sqlite-vss" = { version = "v0.0.3", artifacts = ["vector0"] }
+"https://github.com/asg017/sqlite-hello" = {version="v0.1.0-alpha.39", artifacts=["hello0"]}
 #"github.com/asg017/sqlite-vss" = {version="v0.0.3", artifacts=["vector0"]}
 
 
 #"github.com/asg017/sqlite-url" = "v0.1.0-alpha.3"
 #"github.com/asg017/sqlite-html" = "v0.1.2-alpha.4"
 #"github.com/asg017/sqlite-http" = "v0.1.0-alpha.2"
+"https://github.com/asg017/sqlite-path" = "v0.2.0-alpha.5"

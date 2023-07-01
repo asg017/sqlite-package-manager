@@ -28,7 +28,14 @@ fn command() -> Command {
             Command::new("add")
                 .about("Add a SQLite extension to your spm project.")
                 .arg(Arg::new("url").required(true))
-                .arg(Arg::new("artifacts").required(false)),
+                .arg(Arg::new("artifacts").required(false))
+                .arg(
+                    Arg::new("pre-release")
+                        .long("pre-release")
+                        .alias("pre")
+                        .action(ArgAction::SetTrue)
+                        .required(false),
+                ),
         )
         .subcommand(
             Command::new("install")
@@ -39,7 +46,7 @@ fn command() -> Command {
                         "isntall",
                     ],
                 )
-                .about("Install all listed SQLite extensions"),
+                .about("Install all SQLite extensions in spm.toml"),
         )
         .subcommand(
             Command::new("ci")
@@ -47,7 +54,7 @@ fn command() -> Command {
                     // https://docs.npmjs.com/cli/v8/commands/npm-ci#synopsis
                     ["clean-install", "ic", "install-clean", "isntall-clean"],
                 )
-                .about("Install all listed SQLite extensions"),
+                .about("Verify spm.toml and spm.lock match, then install all SQLite extensions"),
         )
         .subcommand(
             Command::new("run")
@@ -79,9 +86,9 @@ fn execute_matches(matches: ArgMatches) -> Result<()> {
             let artifacts: Option<Vec<String>> = matches
                 .get_many::<String>("artifacts")
                 .map(|v| v.into_iter().map(|v| v.to_string()).collect());
-
+            let prerelease = matches.get_one::<bool>("pre-release").map_or(false, |b| *b);
             let project = Project::resolve_from_args(matches)?;
-            project.command_add(url, artifacts)
+            project.command_add(url, artifacts, prerelease)
         }
         Some(("install", matches)) => {
             let project = Project::resolve_from_args(matches)?;
